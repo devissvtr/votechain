@@ -586,6 +586,40 @@ class UserLoginRepository(private val context: Context) {
     }
 
     /**
+     * Store private key for specific email user (backup storage)
+     */
+    fun storePrivateKey(email: String, privateKey: String) {
+        try {
+            val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            with(sharedPreferences.edit()) {
+                putString("${email}_private_key", privateKey)
+                putLong("${email}_private_key_timestamp", System.currentTimeMillis())
+                apply()
+            }
+            Log.d(TAG, "✅ Private key stored for: $email")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error storing private key for $email: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Store public key for specific email user (backup storage)
+     */
+    fun storePublicKey(email: String, publicKey: String) {
+        try {
+            val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            with(sharedPreferences.edit()) {
+                putString("${email}_public_key", publicKey)
+                putLong("${email}_public_key_timestamp", System.currentTimeMillis())
+                apply()
+            }
+            Log.d(TAG, "✅ Public key stored for: $email")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error storing public key for $email: ${e.message}", e)
+        }
+    }
+
+    /**
      * Clear backup keys for specific user
      */
     fun clearBackupKeysForUser(email: String) {

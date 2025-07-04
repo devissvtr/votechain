@@ -1,6 +1,9 @@
 package com.nocturna.votechain.ui.screens.profilepage
 
 import android.util.Log
+import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -18,6 +21,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -35,7 +39,9 @@ import com.nocturna.votechain.ui.theme.AppTypography
 import com.nocturna.votechain.ui.theme.DangerColors
 import com.nocturna.votechain.ui.theme.MainColors
 import com.nocturna.votechain.ui.theme.NeutralColors
+import com.nocturna.votechain.ui.theme.SuccessColors
 import com.nocturna.votechain.utils.LanguageManager
+import com.nocturna.votechain.utils.WalletImportUtils
 import com.nocturna.votechain.viewmodel.login.LoginViewModel
 import com.nocturna.votechain.viewmodel.login.LoginViewModel.KeyIntegrityStatus
 import kotlinx.coroutines.delay
@@ -46,158 +52,68 @@ import kotlinx.coroutines.launch
 fun AccountDetailsScreen(
     navController: NavController,
     modifier: Modifier = Modifier,
-    onLogout: () -> Unit = {},
-    onBackClick: () -> Unit = {},
+    onLogout: () -> Unit = {}
 ) {
-    val strings = LanguageManager.getLocalizedStrings()
-    val scrollState = rememberScrollState()
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val clipboardManager = LocalClipboardManager.current
+    val coroutineScope = rememberCoroutineScope()
 
-    // Repository instances
+    // Repositories
     val userProfileRepository = remember { UserProfileRepository(context) }
     val userLoginRepository = remember { UserLoginRepository(context) }
     val voterRepository = remember { VoterRepository(context) }
-    val cryptoKeyManager = remember { CryptoKeyManager(context) }
 
-    // Get LoginViewModel instance
-    val loginViewModel: LoginViewModel = viewModel(factory = LoginViewModel.Factory(context))
-
-    // State for account data
+    // State variables
     var accountData by remember { mutableStateOf(AccountDisplayData()) }
     var isLoading by remember { mutableStateOf(true) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    var isKeyLoading by remember { mutableStateOf(false) }
     var showPrivateKey by remember { mutableStateOf(false) }
+    var showPublicKey by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
-    var keyIntegrityStatus by remember { mutableStateOf<KeyIntegrityStatus?>(null) }
-    var keyDiagnostics by remember { mutableStateOf("") }
-    var showLogoutDialog by remember { mutableStateOf(false) }
+    var showImportWalletDialog by remember { mutableStateOf(false) }
+    var showRestoreDialog by remember { mutableStateOf(false) }
+    var walletRecoveryInfo by remember { mutableStateOf<WalletImportUtils.WalletRecoveryInfo?>(null) }
 
-    // Enhanced error states
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var keyErrorMessage by remember { mutableStateOf<String?>(null) }
-
-    // For copy to clipboard functionality
-    val clipboardManager = LocalClipboardManager.current
-    var showCopiedMessage by remember { mutableStateOf(false) }
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    /**
-     * Derive voter address from public key
-     */
-    fun deriveVoterAddressFromPublicKey(publicKey: String): String {
-        return try {
-            val cleanPublicKey = if (publicKey.startsWith("0x")) {
-                publicKey.substring(2)
-            } else {
-                publicKey
-            }
-
-            val publicKeyBigInt = java.math.BigInteger(cleanPublicKey, 16)
-            val addressHex = org.web3j.crypto.Keys.getAddress(publicKeyBigInt)
-            org.web3j.crypto.Keys.toChecksumAddress("0x" + addressHex)
-        } catch (e: Exception) {
-            Log.e("AccountDetails", "Error deriving voter address: ${e.message}")
-            "0x0000000000000000000000000000000000000000"
-        }
-    }
-
-    /**
-     * Load minimal account data dengan key recovery
-     */
-    suspend fun loadMinimalAccountDataWithKeyRecovery(userEmail: String) {
-        try {
-            Log.d("AccountDetails", "📦 Loading minimal account data with key recovery...")
-
-            val localVoterData = voterRepository.getVoterDataLocally()
-            val walletInfo = voterRepository.getCompleteWalletInfo()
-
-            // Try to get keys from both storages
-            val cryptoKeyManager = CryptoKeyManager(context)
-            var privateKey = cryptoKeyManager.getPrivateKey()
-            var publicKey = cryptoKeyManager.getPublicKey()
-            var voterAddress = cryptoKeyManager.getVoterAddress()
-
-            // Fallback to backup storage
-            if (privateKey.isNullOrEmpty()) {
-                privateKey = userLoginRepository.getPrivateKey(userEmail)
-                publicKey = userLoginRepository.getPublicKey(userEmail)
-
-                if (publicKey != null) {
-                    voterAddress = deriveVoterAddressFromPublicKey(publicKey)
-                }
-            }
-
-            accountData = AccountDisplayData(
-                fullName = localVoterData?.full_name ?: "N/A",
-                email = userEmail,
-                nik = localVoterData?.nik ?: "N/A",
-                publicKey = publicKey ?: "",
-                privateKey = privateKey ?: "",
-                voterAddress = voterAddress ?: localVoterData?.voter_address ?: "",
-                ethBalance = walletInfo.balance,
-                hasVoted = localVoterData?.has_voted ?: false
-            )
-
-            Log.d("AccountDetails", "📦 Minimal account data loaded with key recovery")
-        } catch (e: Exception) {
-            Log.e("AccountDetails", "❌ Error loading minimal data: ${e.message}", e)
-        }
-    }
-
-    // Function to load account data
-    suspend fun loadAccountDataEnhanced() {
+    // Load account data
+    LaunchedEffect(Unit) {
         try {
             isLoading = true
-            errorMessage = null
 
-            Log.d("AccountDetails", "🔄 Loading enhanced account data...")
+            // Check wallet recovery info
+            walletRecoveryInfo = WalletImportUtils.getWalletRecoveryInfo(context)
 
-            // Step 1: Get user email
+            // Get user email
             val userEmail = userLoginRepository.getUserEmail()
-            if (userEmail.isNullOrEmpty()) {
-                errorMessage = "No user session found"
-                return
-            }
 
-            // Step 2: Verify dan load crypto keys
-            Log.d("AccountDetails", "🔐 Verifying crypto keys...")
-            val keyStatus = userLoginRepository.verifyKeysIntegrityAfterLogin(userEmail)
-
-            if (!keyStatus) {
-                Log.w("AccountDetails", "⚠️ Keys need repair, attempting auto-repair...")
-
+            // Attempt to repair keys if needed
+            if (!walletRecoveryInfo!!.hasPrimaryKeys && walletRecoveryInfo!!.hasBackupKeys) {
+                Log.d("AccountDetails", "🔧 Attempting to restore keys from backup...")
                 try {
-                    // Try to repair keys
-                    val app = context.applicationContext as VoteChainApplication
-                    val repairSuccess = app.forceReloadAllKeys()
-
-                    if (repairSuccess) {
-                        Log.d("AccountDetails", "✅ Keys repaired successfully")
-                    } else {
-                        Log.w("AccountDetails", "⚠️ Key repair failed")
+                    val restoreResult = WalletImportUtils.restoreFromBackup(context)
+                    if (restoreResult.success) {
+                        Log.d("AccountDetails", "✅ Keys restored from backup")
+                        // Refresh recovery info
+                        walletRecoveryInfo = WalletImportUtils.getWalletRecoveryInfo(context)
                     }
                 } catch (e: Exception) {
-                    Log.e("AccountDetails", "❌ Error during key repair: ${e.message}")
+                    Log.e("AccountDetails", "❌ Error during key restoration: ${e.message}")
                 }
             }
 
-            // Step 3: Load profile data
+            // Load profile data
             userProfileRepository.fetchCompleteUserProfile().fold(
                 onSuccess = { profile ->
                     Log.d("AccountDetails", "✅ Profile data loaded")
 
-                    // Step 4: Get wallet info dengan enhanced verification
+                    // Get wallet info with enhanced verification
                     val walletInfo = voterRepository.getCompleteWalletInfo()
 
-                    // Step 5: Get crypto keys dengan verification
+                    // Get crypto keys with verification
                     val cryptoKeyManager = CryptoKeyManager(context)
                     var privateKey = cryptoKeyManager.getPrivateKey()
                     var publicKey = cryptoKeyManager.getPublicKey()
                     var voterAddress = cryptoKeyManager.getVoterAddress()
 
-                    // Step 6: Fallback ke backup storage jika keys tidak ada
+                    // Fallback to backup storage if keys not available
                     if (privateKey.isNullOrEmpty() && userEmail != null) {
                         Log.w("AccountDetails", "🔧 Primary keys empty, checking backup storage...")
 
@@ -211,15 +127,14 @@ fun AccountDetailsScreen(
 
                             // Try to restore to primary storage
                             try {
-                                val restoredVoterAddress = deriveVoterAddressFromPublicKey(backupPublicKey)
                                 val keyPairInfo = CryptoKeyManager.KeyPairInfo(
                                     publicKey = backupPublicKey,
                                     privateKey = backupPrivateKey,
-                                    voterAddress = restoredVoterAddress,
+                                    voterAddress = "0x$backupPublicKey",
                                     generationMethod = "Profile_Backup_Restoration"
                                 )
                                 cryptoKeyManager.storeKeyPair(keyPairInfo)
-                                voterAddress = restoredVoterAddress
+                                voterAddress = "0x$backupPublicKey"
                                 Log.d("AccountDetails", "✅ Keys restored to primary storage")
                             } catch (e: Exception) {
                                 Log.e("AccountDetails", "❌ Failed to restore keys: ${e.message}")
@@ -229,352 +144,665 @@ fun AccountDetailsScreen(
                         }
                     }
 
-                    // Step 7: Update account data
+                    // Update account data
                     accountData = AccountDisplayData(
-//                        fullName = profile.userProfile?.full_name ?: "N/A",
-                        email = userEmail,
-//                        nik = localVoterData?.nik ?: "N/A",
+                        fullName = profile.voterProfile?.full_name ?: "N/A",
+                        nik = profile.voterProfile?.nik ?: "N/A",
+                        email = profile.userProfile?.email ?: userEmail ?: "",
+                        ethBalance = walletInfo.balance,
                         publicKey = publicKey ?: "",
                         privateKey = privateKey ?: "",
-                        voterAddress = voterAddress ?: "",
-                        ethBalance = walletInfo.balance,
-                        hasVoted = profile.voterProfile?.has_voted ?: false
+                        voterAddress = voterAddress ?: walletInfo.voterAddress,
+                        hasVoted = profile.voterProfile?.has_voted ?: false,
+                        isDataLoading = false,
+                        errorMessage = if (walletInfo.hasError) walletInfo.errorMessage else null
                     )
-
-                    // Step 8: Log status
-                    Log.d("AccountDetails", "✅ Account data updated:")
-                    Log.d("AccountDetails", "- Private Key: ${if (privateKey != null) "✅ Available" else "❌ Missing"}")
-                    Log.d("AccountDetails", "- Public Key: ${if (publicKey != null) "✅ Available" else "❌ Missing"}")
-                    Log.d("AccountDetails", "- Voter Address: ${if (voterAddress != null) "✅ Available" else "❌ Missing"}")
-
                 },
                 onFailure = { error ->
-                    Log.e("AccountDetails", "❌ Failed to load profile: ${error.message}")
-                    errorMessage = "Failed to load profile data: ${error.message}"
-
-                    // Try to load minimal data from local storage
-                    loadMinimalAccountDataWithKeyRecovery(userEmail)
+                    Log.e("AccountDetails", "Error loading profile: ${error.message}")
+                    accountData = AccountDisplayData(
+                        isDataLoading = false,
+                        errorMessage = "Failed to load account data: ${error.message}"
+                    )
                 }
             )
-        } catch (e: Exception) {
-            Log.e("AccountDetails", "❌ Exception loading account data: ${e.message}", e)
-            errorMessage = "Unexpected error: ${e.message}"
         } finally {
             isLoading = false
         }
     }
 
-    // Function to refresh balance
-    fun refreshBalance() {
-        scope.launch {
-            try {
-                isRefreshing = true
-                val newBalance = voterRepository.refreshBalance()
-                accountData = accountData.copy(
-                    ethBalance = newBalance,
-                    errorMessage = null
-                )
+    if (isLoading) {
+        LoadingScreen(onClose = { /* Do nothing during loading */ })
+        return
+    }
 
-                // Show success message
-                snackbarHostState.showSnackbar("Balance updated successfully")
-            } catch (e: Exception) {
-                snackbarHostState.showSnackbar("Failed to refresh balance: ${e.message}")
-            } finally {
-                isRefreshing = false
+    if (accountData.errorMessage != null) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "Error: ${accountData.errorMessage}",
+                style = AppTypography.paragraphRegular,
+                color = DangerColors.Danger50,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = { navController.popBackStack() }
+            ) {
+                Text("Go Back")
             }
         }
+        return
     }
 
-    // Function to copy text to clipboard
-    fun copyToClipboard(text: String, label: String) {
-        clipboardManager.setText(AnnotatedString(text))
-        scope.launch {
-            snackbarHostState.showSnackbar("$label copied to clipboard")
-        }
-    }
+    val scrollState = rememberScrollState()
 
-
-    // Load data on first composition
-    LaunchedEffect(Unit) {
-        loadAccountDataEnhanced()
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Custom top bar with shadow
-        Box(
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .verticalScroll(scrollState)
+    ) {
+        // Top Bar
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 24.dp)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 24.dp)
-                    .clickable(onClick = onBackClick)
-                    .size(24.dp),
-                contentAlignment = Alignment.Center
+            IconButton(
+                onClick = { navController.popBackStack() }
             ) {
                 Icon(
-                    painter = painterResource(id = R.drawable.back),
-                    contentDescription = strings.back,
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(20.dp)
+                    painter = painterResource(R.drawable.back),
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onBackground
                 )
             }
 
-            // Centered title
+            Spacer(modifier = Modifier.width(8.dp))
+
             Text(
-                text = strings.profileNav,
-                style = AppTypography.heading4Regular,
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.align(Alignment.Center)
+                text = "Account Details",
+                style = AppTypography.heading3Bold,
+                color = MaterialTheme.colorScheme.onBackground
             )
         }
 
-        if (showLogoutDialog) {
-            AlertDialog(
-                onDismissRequest = { showLogoutDialog = false },
-                title = {
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // User Info Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "User Information",
+                    style = AppTypography.heading4Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                InfoRow("Full Name", accountData.fullName)
+                InfoRow("NIK", accountData.nik)
+                InfoRow("Email", accountData.email)
+                InfoRow("Voting Status", if (accountData.hasVoted) "Voted" else "Not Voted")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Wallet Status Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = "Logout",
+                        text = "Wallet Status",
                         style = AppTypography.heading4Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                },
-                text = {
-                    Text(
-                        text = "Are you sure you want to logout from your account?",
-                        style = AppTypography.paragraphRegular,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showLogoutDialog = false
-                            loginViewModel.logoutUser()
-                            onLogout()
-                        },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = NeutralColors.Neutral40
-                        )
-                    ) {
-                        Text("Logout")
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { showLogoutDialog = false },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
 
-        // Show loading indicator when loading
-        if (isLoading) {
-            LoadingScreen()
-        }
-        // Show error message when there's an error
-        else {
-            Box(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp)
-                ) {
-                    // Balance
-                    Text(
-                        text = strings.balance,
-                        style = AppTypography.heading5Regular,
-                        color = NeutralColors.Neutral70,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+                    Spacer(modifier = Modifier.weight(1f))
 
-                    OutlinedTextField(
-                        value = "${accountData.ethBalance} ETH",
-                        onValueChange = { },
-                        readOnly = true,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = NeutralColors.Neutral30,
-                            unfocusedTextColor = NeutralColors.Neutral50,
-                            disabledBorderColor = NeutralColors.Neutral30,
-                            disabledTextColor = NeutralColors.Neutral70,
-                            focusedBorderColor = MainColors.Primary1,
-                            focusedTextColor = NeutralColors.Neutral50,
-                        ),
-                        textStyle = AppTypography.heading5Regular
-                    )
-
-                    // NIK
-                    Text(
-                        text = strings.nik,
-                        style = AppTypography.heading5Regular,
-                        color = NeutralColors.Neutral70,
-                        modifier = Modifier.padding(bottom = 8.dp, top = 24.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = accountData.nik,
-                        onValueChange = { },
-                        readOnly = true,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = NeutralColors.Neutral30,
-                            unfocusedTextColor = NeutralColors.Neutral50,
-                            disabledBorderColor = NeutralColors.Neutral30,
-                            disabledTextColor = NeutralColors.Neutral70,
-                            focusedBorderColor = MainColors.Primary1,
-                            focusedTextColor = NeutralColors.Neutral50,
-                        ),
-                        textStyle = AppTypography.heading5Regular
-                    )
-
-                    // Full Name
-                    Text(
-                        text = "Full Name",
-                        style = AppTypography.heading5Regular,
-                        color = NeutralColors.Neutral70,
-                        modifier = Modifier.padding(bottom = 8.dp, top = 24.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = accountData.fullName,
-                        onValueChange = { },
-                        readOnly = true,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = NeutralColors.Neutral30,
-                            unfocusedTextColor = NeutralColors.Neutral50,
-                            disabledBorderColor = NeutralColors.Neutral30,
-                            disabledTextColor = NeutralColors.Neutral70,
-                            focusedBorderColor = MainColors.Primary1,
-                            focusedTextColor = NeutralColors.Neutral50,
-                        ),
-                        textStyle = AppTypography.heading5Regular
-                    )
-
-                    // Private Key
-                    Text(
-                        text = strings.privateKey,
-                        style = AppTypography.heading5Regular,
-                        color = NeutralColors.Neutral70,
-                        modifier = Modifier.padding(bottom = 8.dp, top = 24.dp)
-                    )
-
-                    OutlinedTextField(
-                        value =
-                            if (showPrivateKey && accountData.privateKey.isNotEmpty()) {
-                                accountData.privateKey
+                    // Status indicator
+                    val isWalletComplete = WalletImportUtils.isWalletDataComplete(context)
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isWalletComplete) {
+                                SuccessColors.Success10
                             } else {
-                                "••••••••••••••••••••••••••••••••"
-                            },
-                        onValueChange = { },
-                        readOnly = true,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = if (showPrivateKey) VisualTransformation.None else PasswordVisualTransformation(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = NeutralColors.Neutral30,
-                            unfocusedTextColor = NeutralColors.Neutral50,
-                            disabledBorderColor = NeutralColors.Neutral30,
-                            disabledTextColor = NeutralColors.Neutral70,
-                            focusedBorderColor = MainColors.Primary1,
-                            focusedTextColor = NeutralColors.Neutral50,
-                            unfocusedTrailingIconColor = NeutralColors.Neutral40,
-                            focusedTrailingIconColor = NeutralColors.Neutral40,
-                        ),
-                        textStyle = AppTypography.heading5Regular,
-                        trailingIcon = {
-                            IconButton(onClick = { showPrivateKey = !showPrivateKey }) {
-                                Icon(
-                                    painter = painterResource(
-                                        id = if (showPrivateKey) R.drawable.show else R.drawable.hide
-                                    ),
-                                    contentDescription = if (showPrivateKey) "Hide private key" else "Show private key",
-                                    tint = NeutralColors.Neutral40
-                                )
+                                DangerColors.Danger10
                             }
-                        }
-                    )
-
-                    // Public Key
-                    Text(
-                        text = strings.publicKey,
-                        style = AppTypography.heading5Regular,
-                        color = NeutralColors.Neutral70,
-                        modifier = Modifier.padding(bottom = 8.dp, top = 24.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = accountData.voterAddress,
-                        onValueChange = { },
-                        readOnly = true,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = NeutralColors.Neutral30,
-                            unfocusedTextColor = NeutralColors.Neutral50,
-                            disabledBorderColor = NeutralColors.Neutral30,
-                            disabledTextColor = NeutralColors.Neutral70,
-                            focusedBorderColor = MainColors.Primary1,
-                            focusedTextColor = NeutralColors.Neutral50,
-                            unfocusedTrailingIconColor = NeutralColors.Neutral40,
-                            focusedTrailingIconColor = NeutralColors.Neutral40,
                         ),
-                        textStyle = AppTypography.heading5Regular,
-                        trailingIcon = {
-                            IconButton(onClick = {
-                                copyToClipboard(accountData.publicKey, "Public Key")
-                            }) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.copy),
-                                    contentDescription = "Copy public key",
-                                    tint = NeutralColors.Neutral40
-                                )
-                            }
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(120.dp))
-
-                    Button(
-                        onClick = { showLogoutDialog = true },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                            .height(48.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = DangerColors.Danger70,
-                            contentColor = NeutralColors.Neutral10
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        elevation = ButtonDefaults.buttonElevation(
-                            defaultElevation = 0.dp,
-                            pressedElevation = 2.dp
-                        )
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Row(
-                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Icon(
+                                painter = painterResource(
+                                    if (isWalletComplete) R.drawable.tickcircle
+                                    else R.drawable.dangercircle
+                                ),
+                                contentDescription = null,
+                                tint = if (isWalletComplete) {
+                                    SuccessColors.Success50
+                                } else {
+                                    DangerColors.Danger50
+                                },
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Logout",
-                                style = AppTypography.heading5Medium,
-                                color = NeutralColors.Neutral10
+                                text = if (isWalletComplete) "Complete" else "Incomplete",
+                                style = AppTypography.paragraphRegular,
+                                color = if (isWalletComplete) {
+                                    SuccessColors.Success70
+                                } else {
+                                    DangerColors.Danger70
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Balance
+                InfoRow("Balance", "${accountData.ethBalance} ETH")
+
+                // Voter Address
+                InfoRowCopyable(
+                    label = "Voter Address",
+                    value = accountData.voterAddress,
+                    onCopy = {
+                        clipboardManager.setText(AnnotatedString(accountData.voterAddress))
+                        Toast.makeText(context, "Voter address copied!", Toast.LENGTH_SHORT).show()
+                    }
+                )
+
+                // Public Key
+                InfoRowCopyable(
+                    label = "Public Key",
+                    value = accountData.publicKey,
+                    isSecret = !showPublicKey,
+                    onToggleVisibility = { showPublicKey = !showPublicKey },
+                    onCopy = {
+                        clipboardManager.setText(AnnotatedString(accountData.publicKey))
+                        Toast.makeText(context, "Public key copied!", Toast.LENGTH_SHORT).show()
+                    }
+                )
+
+                // Private Key
+                InfoRowCopyable(
+                    label = "Private Key",
+                    value = accountData.privateKey,
+                    isSecret = !showPrivateKey,
+                    onToggleVisibility = { showPasswordDialog = true },
+                    onCopy = {
+                        if (showPrivateKey) {
+                            clipboardManager.setText(AnnotatedString(accountData.privateKey))
+                            Toast.makeText(context, "Private key copied!", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    isPrivateKey = true
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Wallet Management Section
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "Wallet Management",
+                    style = AppTypography.heading4Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "Kelola wallet Anda dengan aman. Jika data wallet hilang setelah reinstall, gunakan fitur import wallet.",
+                    style = AppTypography.paragraphRegular,
+                    color = NeutralColors.Neutral60
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Check if wallet data is missing
+                val isWalletDataMissing = accountData.privateKey.isEmpty() ||
+                        accountData.publicKey.isEmpty() ||
+                        !WalletImportUtils.isWalletDataComplete(context)
+
+                if (isWalletDataMissing) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = DangerColors.Danger10
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.dangercircle),
+                                contentDescription = "Warning",
+                                tint = DangerColors.Danger50,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Data wallet tidak lengkap. Import wallet untuk memulihkan data.",
+                                style = AppTypography.paragraphMedium,
+                                color = DangerColors.Danger70
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Import Wallet Button
+                    OutlinedButton(
+                        onClick = {
+                            navController.navigate("import_wallet")
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = MainColors.Primary1
+                        ),
+                        border = BorderStroke(1.dp, MainColors.Primary1),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "Import Wallet",
+                            style = AppTypography.paragraphBold
+                        )
+                    }
+
+                    // Auto Restore Button (if backup available)
+                    if (walletRecoveryInfo?.hasBackupKeys == true && !walletRecoveryInfo!!.hasPrimaryKeys) {
+                        OutlinedButton(
+                            onClick = {
+                                showRestoreDialog = true
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = SuccessColors.Success50
+                            ),
+                            border = BorderStroke(1.dp, SuccessColors.Success50),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "Auto Restore",
+                                style = AppTypography.paragraphBold
+                            )
+                        }
+                    } else {
+                        // Info Button
+                        OutlinedButton(
+                            onClick = { showImportWalletDialog = true },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = NeutralColors.Neutral60
+                            ),
+                            border = BorderStroke(1.dp, NeutralColors.Neutral30),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.infosquare),
+                                contentDescription = "Info",
+                                tint = NeutralColors.Neutral60,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Info Backup",
+                                style = AppTypography.paragraphBold
                             )
                         }
                     }
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Logout Button
+        Button(
+            onClick = onLogout,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = DangerColors.Danger50
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                text = "Logout",
+                style = AppTypography.paragraphBold,
+                color = Color.White
+            )
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    if (showPasswordDialog) {
+        PasswordConfirmationDialog(
+            isOpen = showPasswordDialog,
+            onCancel = { showPasswordDialog = false },
+            onSubmit = {
+                showPrivateKey = true
+                showPasswordDialog = false
+            },
+            userLoginRepository = userLoginRepository
+        )
+    }
+
+    // Import Wallet Info Dialog
+    if (showImportWalletDialog) {
+        AlertDialog(
+            onDismissRequest = { showImportWalletDialog = false },
+            title = {
+                Text(
+                    text = "Informasi Wallet Backup",
+                    style = AppTypography.heading4Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Untuk keamanan data wallet Anda:",
+                        style = AppTypography.paragraphRegular,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "• Simpan private key Anda di tempat yang aman\n" +
+                                "• Jangan bagikan private key kepada siapapun\n" +
+                                "• Gunakan fitur import wallet jika data hilang setelah reinstall\n" +
+                                "• Private key dapat dilihat di section 'Private Key' di atas",
+                        style = AppTypography.paragraphMedium,
+                        color = NeutralColors.Neutral70
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = DangerColors.Danger10
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.infosquare),
+                                contentDescription = "Warning",
+                                tint = DangerColors.Danger50,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Private key memberikan akses penuh ke wallet Anda. Jaga kerahasiaannya!",
+                                style = AppTypography.paragraphMedium,
+                                color = DangerColors.Danger70
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { showImportWalletDialog = false }
+                ) {
+                    Text(
+                        text = "Mengerti",
+                        style = AppTypography.paragraphBold,
+                        color = MainColors.Primary1
+                    )
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(12.dp)
+        )
+    }
+
+    // Auto Restore Confirmation Dialog
+    if (showRestoreDialog) {
+        AlertDialog(
+            onDismissRequest = { showRestoreDialog = false },
+            title = {
+                Text(
+                    text = "Auto Restore Wallet",
+                    style = AppTypography.heading4Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Ditemukan backup wallet di sistem. Apakah Anda ingin memulihkan wallet dari backup?",
+                        style = AppTypography.paragraphMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = SuccessColors.Success10
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.infosquare),
+                                contentDescription = "Info",
+                                tint = SuccessColors.Success50,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Proses ini akan memulihkan wallet dari backup yang tersimpan di akun Anda.",
+                                style = AppTypography.paragraphRegular,
+                                color = SuccessColors.Success70
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        coroutineScope.launch {
+                            try {
+                                val result = WalletImportUtils.restoreFromBackup(context)
+                                if (result.success) {
+                                    Toast.makeText(context, "Wallet berhasil dipulihkan!", Toast.LENGTH_SHORT).show()
+                                    // Refresh the screen
+                                    walletRecoveryInfo = WalletImportUtils.getWalletRecoveryInfo(context)
+                                    // Reload account data
+                                    val walletInfo = voterRepository.getCompleteWalletInfo()
+                                    accountData = accountData.copy(
+                                        ethBalance = walletInfo.balance,
+                                        privateKey = result.publicKey ?: "",
+                                        publicKey = result.publicKey ?: "",
+                                        voterAddress = result.voterAddress ?: ""
+                                    )
+                                } else {
+                                    Toast.makeText(context, "Gagal memulihkan wallet: ${result.message}", Toast.LENGTH_LONG).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        showRestoreDialog = false
+                    }
+                ) {
+                    Text(
+                        text = "Restore",
+                        style = AppTypography.paragraphBold,
+                        color = SuccessColors.Success50
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showRestoreDialog = false }
+                ) {
+                    Text(
+                        text = "Batal",
+                        style = AppTypography.paragraphBold,
+                        color = NeutralColors.Neutral60
+                    )
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(12.dp)
+        )
+    }
+}
+
+@Composable
+private fun InfoRow(
+    label: String,
+    value: String
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = label,
+            style = AppTypography.paragraphMedium,
+            color = NeutralColors.Neutral50
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = value,
+            style = AppTypography.paragraphMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun InfoRowCopyable(
+    label: String,
+    value: String,
+    isSecret: Boolean = false,
+    onToggleVisibility: (() -> Unit)? = null,
+    onCopy: () -> Unit,
+    isPrivateKey: Boolean = false
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = label,
+            style = AppTypography.paragraphRegular,
+            color = NeutralColors.Neutral50
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isSecret) "••••••••••••••••" else value,
+                style = AppTypography.paragraphMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f)
+            )
+
+            if (onToggleVisibility != null) {
+                IconButton(
+                    onClick = onToggleVisibility,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(
+                            if (isSecret) R.drawable.show else R.drawable.hide
+                        ),
+                        contentDescription = if (isSecret) "Show" else "Hide",
+                        tint = NeutralColors.Neutral50,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            if (!isSecret || !isPrivateKey) {
+                IconButton(
+                    onClick = onCopy,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.copy),
+                        contentDescription = "Copy",
+                        tint = MainColors.Primary1,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
     }
 }

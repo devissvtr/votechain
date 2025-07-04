@@ -29,6 +29,7 @@ import com.nocturna.votechain.ui.screens.votepage.CandidateSelectionScreen
 import com.nocturna.votechain.ui.screens.homepage.NotificationScreen
 import com.nocturna.votechain.ui.screens.profilepage.AccountDetailsScreen
 import com.nocturna.votechain.ui.screens.profilepage.FAQScreen
+import com.nocturna.votechain.ui.screens.profilepage.ImportWalletScreen
 import com.nocturna.votechain.ui.screens.profilepage.ProfileScreen
 import com.nocturna.votechain.ui.screens.register.RegistrationFlowController
 import com.nocturna.votechain.ui.screens.votepage.LiveResultScreen
@@ -492,6 +493,12 @@ fun VotechainNavGraph(
 //                        popUpTo(0) { inclusive = true }
 //                    }
 //                }
+            )
+        }
+
+        composable("import_wallet") {
+            ImportWalletScreen(
+                navController = navController
             )
         }
 
