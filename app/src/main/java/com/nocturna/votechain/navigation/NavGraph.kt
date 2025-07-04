@@ -37,6 +37,7 @@ import com.nocturna.votechain.ui.screens.votepage.ResultsScreen
 import com.nocturna.votechain.ui.screens.votepage.VoteConfirmationScreen
 import com.nocturna.votechain.ui.screens.votepage.VoteSuccessScreen
 import com.nocturna.votechain.ui.screens.votepage.VotingScreen
+import com.nocturna.votechain.ui.screens.wallet.WalletImportScreen
 import com.nocturna.votechain.viewmodel.candidate.ElectionViewModel
 import com.nocturna.votechain.viewmodel.login.LoginViewModel
 import com.nocturna.votechain.viewmodel.register.RegisterViewModel
@@ -502,6 +503,18 @@ fun VotechainNavGraph(
                     // Navigate to login screen and clear all previous screens from back stack
                     navController.navigate("login") {
                         popUpTo(0) { inclusive = true }
+                    }
+                }
+            )
+        }
+
+        composable("wallet_import") {
+            WalletImportScreen(
+                onBackClick = { navController.popBackStack() },
+                onSuccessClick = { walletAddress ->
+                    // Navigate to wallet or profile screen
+                    navController.navigate("profile") {
+                        popUpTo("wallet_import") { inclusive = true }
                     }
                 }
             )

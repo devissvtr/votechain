@@ -73,6 +73,7 @@ import com.nocturna.votechain.ui.screens.BottomNavigation
 import com.nocturna.votechain.ui.theme.AppTypography
 import com.nocturna.votechain.ui.theme.MainColors
 import com.nocturna.votechain.ui.theme.NeutralColors
+import com.nocturna.votechain.ui.theme.PrimaryColors
 
 @Composable
 fun ProfileScreen(
@@ -605,6 +606,20 @@ fun ProfileScreen(
                 }
 
                 Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+
+                Button(
+                    onClick = { navController.navigate("wallet_import") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryColors.Primary50
+                    )
+                ) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Import Wallet",
+                        style = AppTypography.heading5Medium
+                    )
+                }
             }
         }
 

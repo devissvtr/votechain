@@ -8,6 +8,8 @@ import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.nocturna.votechain.data.repository.UserLoginRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.web3j.crypto.ECKeyPair
 import org.web3j.crypto.Keys
@@ -23,7 +25,10 @@ import java.security.spec.ECGenParameterSpec
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 import kotlin.compareTo
 
 /**
@@ -1011,7 +1016,7 @@ class CryptoKeyManager(private val context: Context) {
     /**
      * Validate private key format with improved flexibility
      */
-    private fun validatePrivateKeyFormat(privateKey: String): Boolean {
+    fun validatePrivateKeyFormat(privateKey: String): Boolean {
         return try {
             // Handle null or empty keys
             if (privateKey.isNullOrEmpty()) {
@@ -1408,5 +1413,209 @@ class CryptoKeyManager(private val context: Context) {
             Log.e(TAG, "Error during key repair: ${e.message}", e)
             false
         }
+    }
+
+    /**
+     * Import wallet from private key with password protection
+     * Follows the same security pattern as the web implementation
+     */
+    suspend fun importWalletFromPrivateKey(
+        privateKey: String,
+        userPassword: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Starting wallet import from private key")
+
+            // Validate private key format
+            val cleanPrivateKey = privateKey.trim().let {
+                if (it.startsWith("0x", ignoreCase = true)) it else "0x$it"
+            }
+            if (!validatePrivateKeyFormat(cleanPrivateKey)) {
+                return@withContext Result.failure(SecurityException("Invalid private key format"))
+            }
+
+            // Generate key pair from private key
+            val privateKeyBigInt = if (cleanPrivateKey.startsWith("0x")) {
+                BigInteger(cleanPrivateKey.substring(2), 16)
+            } else {
+                BigInteger(cleanPrivateKey, 16)
+            }
+
+            val ecKeyPair = ECKeyPair.create(privateKeyBigInt)
+
+            // Validate the generated key pair
+            if (!validateKeyPairSignature(ecKeyPair)) {
+                return@withContext Result.failure(SecurityException("Invalid key pair generated from private key"))
+            }
+
+            // Create key pair info
+            val keyPairInfo = KeyPairInfo(
+                publicKey = Numeric.toHexStringWithPrefix(ecKeyPair.publicKey),
+                privateKey = Numeric.toHexStringWithPrefix(ecKeyPair.privateKey),
+                voterAddress = "0x" + Keys.getAddress(ecKeyPair),
+                generationMethod = "Imported_Private_Key"
+            )
+
+            // Store with password protection (similar to web implementation)
+            storeImportedKeyPair(keyPairInfo, userPassword)
+
+            Log.d(TAG, "✅ Wallet import successful. Address: ${keyPairInfo.voterAddress}")
+
+            Result.success(keyPairInfo.voterAddress)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Wallet import failed: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Clean and validate private key input
+     */
+    private fun cleanAndValidatePrivateKey(privateKey: String): String {
+        return privateKey.trim()
+            .replace("\\s+".toRegex(), "") // Remove whitespace
+            .lowercase()
+    }
+
+    /**
+     * Store imported key pair with password-based encryption
+     * Similar to web implementation using user password
+     */
+    private fun storeImportedKeyPair(keyPairInfo: KeyPairInfo, userPassword: String) {
+        try {
+            // Store with password-derived encryption (similar to web CryptoJS approach)
+            val passwordEncryptedKey = encryptWithPassword(keyPairInfo.privateKey, userPassword)
+
+            // Double encryption for enhanced security
+            val encryptedData = encryptPrivateKey(passwordEncryptedKey)
+
+            // Use the existing encryptedSharedPreferences instead of creating new ones
+            encryptedSharedPreferences.edit().apply {
+                putString(PUBLIC_KEY_KEY, keyPairInfo.publicKey)
+                putString(ENCRYPTED_PRIVATE_KEY_KEY, encryptedData.encryptedData)
+                putString(VOTER_ADDRESS_KEY, keyPairInfo.voterAddress)
+                putString(IV_KEY, encryptedData.iv)
+                putString(KEY_GENERATION_METHOD, keyPairInfo.generationMethod)
+                putLong(KEY_CREATION_TIME, System.currentTimeMillis())
+                putBoolean("is_imported_wallet", true)
+                apply()
+            }
+
+            Log.d(TAG, "Imported key pair stored securely")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to store imported key pair", e)
+            throw SecurityException("Failed to store imported wallet", e)
+        }
+    }
+
+    /**
+     * Encrypt private key with password (similar to web CryptoJS)
+     * Uses PBKDF2 for key derivation like industry standards
+     */
+    private fun encryptWithPassword(privateKey: String, password: String): String {
+        try {
+            // Generate salt
+            val salt = ByteArray(16)
+            SecureRandom().nextBytes(salt)
+
+            // Derive key from password using PBKDF2
+            val keySpec = PBEKeySpec(password.toCharArray(), salt, 100000, 256)
+            val keyFactory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            val secretKey = keyFactory.generateSecret(keySpec)
+
+            // Generate IV
+            val iv = ByteArray(12)
+            SecureRandom().nextBytes(iv)
+
+            // Encrypt
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val gcmSpec = GCMParameterSpec(128, iv)
+            val aesKey = SecretKeySpec(secretKey.encoded, "AES")
+
+            cipher.init(Cipher.ENCRYPT_MODE, aesKey, gcmSpec)
+            val encryptedBytes = cipher.doFinal(privateKey.toByteArray())
+
+            // Combine salt + iv + encrypted data
+            val combined = salt + iv + encryptedBytes
+            return Base64.encodeToString(combined, Base64.NO_WRAP)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Password encryption failed", e)
+            throw SecurityException("Failed to encrypt with password", e)
+        }
+    }
+
+    /**
+     * Decrypt private key with password
+     */
+    fun decryptWithPassword(encryptedData: String, password: String): String {
+        try {
+            val combinedBytes = Base64.decode(encryptedData, Base64.NO_WRAP)
+
+            // Extract components
+            val salt = combinedBytes.sliceArray(0..15)
+            val iv = combinedBytes.sliceArray(16..27)
+            val encryptedBytes = combinedBytes.sliceArray(28 until combinedBytes.size)
+
+            // Derive key from password
+            val keySpec = PBEKeySpec(password.toCharArray(), salt, 100000, 256)
+            val keyFactory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            val secretKey = keyFactory.generateSecret(keySpec)
+
+            // Decrypt
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val gcmSpec = GCMParameterSpec(128, iv)
+            val aesKey = SecretKeySpec(secretKey.encoded, "AES")
+
+            cipher.init(Cipher.DECRYPT_MODE, aesKey, gcmSpec)
+            val decryptedBytes = cipher.doFinal(encryptedBytes)
+
+            return String(decryptedBytes)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Password decryption failed", e)
+            throw SecurityException("Incorrect password or corrupted data", e)
+        }
+    }
+
+    /**
+     * Verify imported wallet with password
+     */
+suspend fun verifyWalletPassword(password: String): Result<Boolean> = withContext(Dispatchers.IO) {
+    try {
+        val prefs = EncryptedSharedPreferences.create(
+            context,  // Context must be first parameter
+            PREFS_NAME,
+            getMasterKey(),
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+
+        val encryptedKey = prefs.getString(ENCRYPTED_PRIVATE_KEY_KEY, null)
+        val iv = prefs.getString(IV_KEY, null)
+
+        if (encryptedKey == null || iv == null) {
+            return@withContext Result.failure(SecurityException("No wallet found"))
+        }
+
+        // Try to decrypt to verify password
+        val decryptedData = doubleDecryptPrivateKey(encryptedKey.toString(), iv.toString())
+        decryptWithPassword(decryptedData, password) // This will throw if wrong password
+
+        Result.success(true)
+
+    } catch (e: Exception) {
+        Log.e(TAG, "Password verification failed: ${e.message}")
+        Result.failure(e)
+    }
+}
+
+    /**
+     * Get the MasterKey instance for encryption
+     */
+    private fun getMasterKey(): MasterKey {
+        return masterKey
     }
 }
