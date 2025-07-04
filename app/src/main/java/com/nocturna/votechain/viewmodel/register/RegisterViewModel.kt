@@ -1417,4 +1417,3 @@ class RegisterViewModel(
         }
     }
 }
-
