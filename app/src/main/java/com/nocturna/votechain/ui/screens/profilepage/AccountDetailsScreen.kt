@@ -25,6 +25,7 @@ import androidx.navigation.NavController
 import com.nocturna.votechain.R
 import com.nocturna.votechain.VoteChainApplication
 import com.nocturna.votechain.data.model.AccountDisplayData
+import com.nocturna.votechain.data.model.VoterData
 import com.nocturna.votechain.data.repository.UserLoginRepository
 import com.nocturna.votechain.data.repository.UserProfileRepository
 import com.nocturna.votechain.data.repository.VoterRepository
@@ -110,6 +111,7 @@ fun AccountDetailsScreen(
         try {
             Log.d("AccountDetails", "📦 Loading minimal account data with key recovery...")
 
+            // Get local voter data
             val localVoterData = voterRepository.getVoterDataLocally()
             val walletInfo = voterRepository.getCompleteWalletInfo()
 
@@ -129,20 +131,61 @@ fun AccountDetailsScreen(
                 }
             }
 
+            // Update account data dengan SEMUA field
             accountData = AccountDisplayData(
-                fullName = localVoterData?.full_name ?: "N/A",
-                email = userEmail,
-                nik = localVoterData?.nik ?: "N/A",
+                fullName = localVoterData?.full_name ?: "N/A", // ✅ Full Name
+                email = userEmail, // ✅ Email
+                nik = localVoterData?.nik ?: "N/A", // ✅ FIX: NIK dari local data
                 publicKey = publicKey ?: "",
                 privateKey = privateKey ?: "",
-                voterAddress = voterAddress ?: localVoterData?.voter_address ?: "",
+                voterAddress = voterAddress ?: localVoterData?.voter_address ?: "", // ✅ Voter Address
                 ethBalance = walletInfo.balance,
-                hasVoted = localVoterData?.has_voted ?: false
+                hasVoted = localVoterData?.has_voted ?: false,
+                isDataLoading = false,
+                errorMessage = if (localVoterData == null) "Using cached data - please refresh" else null
             )
 
-            Log.d("AccountDetails", "📦 Minimal account data loaded with key recovery")
+            Log.d("AccountDetails", "📦 Minimal account data loaded:")
+            Log.d("AccountDetails", "- Full Name: ${accountData.fullName}")
+            Log.d("AccountDetails", "- NIK: ${accountData.nik}")
+            Log.d("AccountDetails", "- Voter Address: ${accountData.voterAddress}")
         } catch (e: Exception) {
             Log.e("AccountDetails", "❌ Error loading minimal data: ${e.message}", e)
+            errorMessage = "Error loading cached data: ${e.message}"
+        }
+    }
+
+    suspend fun updateAccountDataWithVoterData(userEmail: String, voterData: VoterData) {
+        try {
+            // Get crypto keys
+            val cryptoKeyManager = CryptoKeyManager(context)
+            val publicKey = cryptoKeyManager.getPublicKey() ?: ""
+            val privateKey = cryptoKeyManager.getPrivateKey() ?: ""
+            val voterAddress = cryptoKeyManager.getVoterAddress() ?: voterData.voter_address
+
+            // Get wallet info
+            val walletInfo = voterRepository.getCompleteWalletInfo()
+
+            // Update account data
+            accountData = AccountDisplayData(
+                fullName = voterData.full_name,
+                nik = voterData.nik,
+                email = userEmail,
+                publicKey = publicKey,
+                privateKey = privateKey,
+                voterAddress = voterAddress,
+                ethBalance = walletInfo.balance,
+                hasVoted = voterData.has_voted,
+                isDataLoading = false,
+                errorMessage = null
+            )
+
+            // Save locally
+            voterRepository.saveVoterDataLocally(voterData)
+
+            Log.d("AccountDetails", "✅ Account data updated with direct voter data")
+        } catch (e: Exception) {
+            Log.e("AccountDetails", "❌ Error updating with voter data: ${e.message}")
         }
     }
 
@@ -189,7 +232,31 @@ fun AccountDetailsScreen(
                     Log.d("AccountDetails", "✅ Profile data loaded")
 
                     // Step 4: Get wallet info dengan enhanced verification
-                    val walletInfo = voterRepository.getCompleteWalletInfo()
+                    val voterData = profile.voterProfile
+                    if (voterData != null) {
+                        Log.d("AccountDetails", "✅ Voter data found:")
+                        Log.d("AccountDetails", "- Full Name: ${voterData.full_name}")
+                        Log.d("AccountDetails", "- NIK: ${voterData.nik}")
+                        Log.d("AccountDetails", "- Voter Address: ${voterData.voter_address}")
+                        Log.d("AccountDetails", "- Has Voted: ${voterData.has_voted}")
+                    } else {
+                        Log.w("AccountDetails", "⚠️ No voter data found in profile, attempting direct fetch...")
+
+                        // Fallback: Try to fetch voter data directly
+                        val userToken = userLoginRepository.getUserToken()
+                        if (userToken.isNotEmpty()) {
+                            voterRepository.fetchVoterData(userToken).fold(
+                                onSuccess = { directVoterData ->
+                                    Log.d("AccountDetails", "✅ Direct voter data fetch successful")
+                                    updateAccountDataWithVoterData(userEmail, directVoterData)
+                                    return@fold
+                                },
+                                onFailure = { error ->
+                                    Log.e("AccountDetails", "❌ Direct voter data fetch failed: ${error.message}")
+                                }
+                            )
+                        }
+                    }
 
                     // Step 5: Get crypto keys dengan verification
                     val cryptoKeyManager = CryptoKeyManager(context)
@@ -198,7 +265,7 @@ fun AccountDetailsScreen(
                     var voterAddress = cryptoKeyManager.getVoterAddress()
 
                     // Step 6: Fallback ke backup storage jika keys tidak ada
-                    if (privateKey.isNullOrEmpty() && userEmail != null) {
+                    if (privateKey.isNullOrEmpty() || publicKey.isNullOrEmpty()) {
                         Log.w("AccountDetails", "🔧 Primary keys empty, checking backup storage...")
 
                         val backupPrivateKey = userLoginRepository.getPrivateKey(userEmail)
@@ -230,55 +297,99 @@ fun AccountDetailsScreen(
                     }
 
                     // Step 7: Update account data
+                    if (voterAddress.isNullOrEmpty()) {
+                        voterAddress = voterData?.voter_address ?: ""
+                        Log.d("AccountDetails", "🔧 Using voter address from API: $voterAddress")
+                    }
+
+                    // Step 8: Get wallet info
+                    val walletInfo = voterRepository.getCompleteWalletInfo()
+
+                    // Step 9: Update account data dengan SEMUA field yang diperlukan
                     accountData = AccountDisplayData(
-//                        fullName = profile.userProfile?.full_name ?: "N/A",
-                        email = userEmail,
-//                        nik = localVoterData?.nik ?: "N/A",
+                        fullName = voterData?.full_name ?: "N/A", // ✅ Full Name dari API
+                        email = userEmail, // ✅ Email dari login session
+                        nik = voterData?.nik ?: "N/A", // ✅ FIX: NIK dari API (tidak di-comment)
                         publicKey = publicKey ?: "",
                         privateKey = privateKey ?: "",
-                        voterAddress = voterAddress ?: "",
+                        voterAddress = voterAddress ?: "", // ✅ Public Key/Voter Address
                         ethBalance = walletInfo.balance,
-                        hasVoted = profile.voterProfile?.has_voted ?: false
+                        hasVoted = voterData?.has_voted ?: false,
+                        isDataLoading = false,
+                        errorMessage = null
                     )
 
-                    // Step 8: Log status
-                    Log.d("AccountDetails", "✅ Account data updated:")
-                    Log.d("AccountDetails", "- Private Key: ${if (privateKey != null) "✅ Available" else "❌ Missing"}")
-                    Log.d("AccountDetails", "- Public Key: ${if (publicKey != null) "✅ Available" else "❌ Missing"}")
-                    Log.d("AccountDetails", "- Voter Address: ${if (voterAddress != null) "✅ Available" else "❌ Missing"}")
+                    // Step 10: Save voter data locally untuk cache
+                    if (voterData != null) {
+                        voterRepository.saveVoterDataLocally(voterData)
+                    }
+
+                    // Step 11: Log successful loading
+                    Log.d("AccountDetails", "✅ Account data updated successfully:")
+                    Log.d("AccountDetails", "- Full Name: ${accountData.fullName}")
+                    Log.d("AccountDetails", "- NIK: ${accountData.nik}")
+                    Log.d("AccountDetails", "- Email: ${accountData.email}")
+                    Log.d("AccountDetails", "- Voter Address: ${accountData.voterAddress}")
+                    Log.d("AccountDetails", "- Has Voted: ${accountData.hasVoted}")
+                    Log.d("AccountDetails", "- Private Key Available: ${if (privateKey != null) "✅" else "❌"}")
+                    Log.d("AccountDetails", "- Public Key Available: ${if (publicKey != null) "✅" else "❌"}")
 
                 },
                 onFailure = { error ->
                     Log.e("AccountDetails", "❌ Failed to load profile: ${error.message}")
                     errorMessage = "Failed to load profile data: ${error.message}"
 
-                    // Try to load minimal data from local storage
+                    // Fallback: Try to load minimal data from local storage
                     loadMinimalAccountDataWithKeyRecovery(userEmail)
                 }
             )
         } catch (e: Exception) {
             Log.e("AccountDetails", "❌ Exception loading account data: ${e.message}", e)
             errorMessage = "Unexpected error: ${e.message}"
+
+            // Final fallback: Load from local storage
+            val userEmail = userLoginRepository.getUserEmail()
+            if (!userEmail.isNullOrEmpty()) {
+                loadMinimalAccountDataWithKeyRecovery(userEmail)
+            }
         } finally {
             isLoading = false
         }
     }
 
     // Function to refresh balance
-    fun refreshBalance() {
+    fun refreshVoterData() {
         scope.launch {
             try {
                 isRefreshing = true
-                val newBalance = voterRepository.refreshBalance()
-                accountData = accountData.copy(
-                    ethBalance = newBalance,
-                    errorMessage = null
+                errorMessage = null
+
+                val userEmail = userLoginRepository.getUserEmail()
+                val userToken = userLoginRepository.getUserToken()
+
+                if (userEmail.isNullOrEmpty() || userToken.isEmpty()) {
+                    snackbarHostState.showSnackbar("Session expired. Please login again.")
+                    return@launch
+                }
+
+                Log.d("AccountDetails", "🔄 Refreshing voter data for: $userEmail")
+
+                // Force refresh from API
+                voterRepository.fetchVoterData(userToken).fold(
+                    onSuccess = { voterData ->
+                        updateAccountDataWithVoterData(userEmail, voterData)
+                        snackbarHostState.showSnackbar("Profile data refreshed successfully")
+                        Log.d("AccountDetails", "✅ Voter data refresh successful")
+                    },
+                    onFailure = { error ->
+                        Log.e("AccountDetails", "❌ Voter data refresh failed: ${error.message}")
+                        snackbarHostState.showSnackbar("Failed to refresh: ${error.message}")
+                    }
                 )
 
-                // Show success message
-                snackbarHostState.showSnackbar("Balance updated successfully")
             } catch (e: Exception) {
-                snackbarHostState.showSnackbar("Failed to refresh balance: ${e.message}")
+                Log.e("AccountDetails", "❌ Exception during refresh: ${e.message}", e)
+                snackbarHostState.showSnackbar("Refresh error: ${e.message}")
             } finally {
                 isRefreshing = false
             }
@@ -387,6 +498,34 @@ fun AccountDetailsScreen(
                 Column(
                     modifier = Modifier.padding(24.dp)
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Profile Information",
+                            style = AppTypography.heading4Bold,
+                            color = NeutralColors.Neutral70
+                        )
+
+                        if (!isLoading) {
+                            IconButton(
+                                onClick = { refreshVoterData() },
+                                enabled = !isRefreshing
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.back),
+                                    contentDescription = "Refresh Profile Data",
+                                    tint = if (isRefreshing) NeutralColors.Neutral40 else MainColors.Primary1,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
                     // Balance
                     Text(
                         text = strings.balance,
@@ -515,7 +654,11 @@ fun AccountDetailsScreen(
                     )
 
                     OutlinedTextField(
-                        value = accountData.voterAddress,
+                        value = if (accountData.voterAddress.isNotEmpty()) {
+                            accountData.voterAddress
+                        } else {
+                            "Address not available"
+                        },
                         onValueChange = { },
                         readOnly = true,
                         shape = RoundedCornerShape(8.dp),

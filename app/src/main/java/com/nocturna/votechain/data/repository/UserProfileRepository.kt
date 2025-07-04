@@ -337,6 +337,47 @@ class UserProfileRepository(private val context: Context) {
         }
     }
 
+    suspend fun fetchCompleteUserProfileByEmail(userEmail: String): Result<CompleteUserProfile> {
+        return try {
+            val userToken = userLoginRepository.getUserToken()
+            if (userToken.isEmpty()) {
+                return Result.failure(Exception("No authentication token available"))
+            }
+
+            // Step 1: Get user profile data
+            val userProfileResult = getUserProfile(userEmail, userToken)
+
+            userProfileResult.fold(
+                onSuccess = { userProfile ->
+                    // Step 2: Get voter data using user ID
+                    val voterResult = getVoterProfileByUserId(userProfile.id, userToken)
+
+                    voterResult.fold(
+                        onSuccess = { voterData ->
+                            // Step 3: Combine user and voter data
+                            val completeProfile = CompleteUserProfile(
+                                userProfile = userProfile,
+                                voterProfile = voterData
+                            )
+                            Result.success(completeProfile)
+                        },
+                        onFailure = { error ->
+                            Log.e(TAG, "Failed to fetch voter data: ${error.message}")
+                            Result.failure(error)
+                        }
+                    )
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Failed to fetch user profile: ${error.message}")
+                    Result.failure(error)
+                }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception in fetchCompleteUserProfileByEmail", e)
+            Result.failure(e)
+        }
+    }
+
     /**
      * Save complete profile ke SharedPreferences
      */
