@@ -105,8 +105,8 @@ class CryptoKeyManager(private val context: Context) {
     ) {
         init {
             // Validate private key format at creation
-            require(isValidPrivateKeyFormat(privateKey)) {
-                "Private key must be exactly 66 characters (0x + 64 hex), got: ${privateKey.length}"
+            require(privateKey.startsWith("0x") && privateKey.length == 66) {
+                "Private key must be exactly 66 characters (0x + 64 hex)"
             }
             require(publicKey.startsWith("0x")) { "Public key must start with 0x" }
             require(voterAddress.startsWith("0x") && voterAddress.length == 42) {
@@ -1063,5 +1063,285 @@ class CryptoKeyManager(private val context: Context) {
         }
 
         return debugInfo.toString()
+    }
+
+    /**
+     * Repair corrupted keys by attempting recovery from backup sources
+     * @param userEmail Email user untuk mencari backup keys
+     * @return Boolean - true jika berhasil repair, false jika gagal
+     */
+    fun repairCorruptedKeys(userEmail: String): Boolean {
+        return try {
+            Log.d(TAG, "🔧 Attempting to repair corrupted keys for: $userEmail")
+
+            // Step 1: Clear any corrupted keys first
+            clearStoredKeys()
+            Log.d(TAG, "🗑️ Cleared existing corrupted keys")
+
+            // Step 2: Try to get backup keys from UserLoginRepository
+            val userLoginRepository = com.nocturna.votechain.data.repository.UserLoginRepository(context)
+            val backupPrivateKey = userLoginRepository.getPrivateKey(userEmail)
+            val backupPublicKey = userLoginRepository.getPublicKey(userEmail)
+
+            if (backupPrivateKey != null && backupPublicKey != null) {
+                Log.d(TAG, "✅ Found backup keys, attempting restoration...")
+
+                // Step 3: Validate backup key formats
+                if (!isValidPrivateKeyFormat(backupPrivateKey)) {
+                    Log.e(TAG, "❌ Backup private key format is invalid")
+                    return false
+                }
+
+                if (!backupPublicKey.startsWith("0x") || backupPublicKey.length < 130) {
+                    Log.e(TAG, "❌ Backup public key format is invalid")
+                    return false
+                }
+
+                // Step 4: Derive voter address from public key
+                val voterAddress = try {
+                    val cleanPublicKey = if (backupPublicKey.startsWith("0x")) {
+                        backupPublicKey.substring(2)
+                    } else {
+                        backupPublicKey
+                    }
+                    val publicKeyBigInt = BigInteger(cleanPublicKey, 16)
+                    val addressHex = org.web3j.crypto.Keys.getAddress(publicKeyBigInt)
+                    org.web3j.crypto.Keys.toChecksumAddress("0x" + addressHex)
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Failed to derive voter address: ${e.message}")
+                    return false
+                }
+
+                // Step 5: Create KeyPairInfo and store
+                val restoredKeyPairInfo = KeyPairInfo(
+                    publicKey = backupPublicKey,
+                    privateKey = backupPrivateKey,
+                    voterAddress = voterAddress,
+                    generationMethod = "Repaired_From_Backup"
+                )
+
+                // Step 6: Validate the restored key pair
+                try {
+                    validateKeyPair(restoredKeyPairInfo)
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Restored key pair validation failed: ${e.message}")
+                    return false
+                }
+
+                // Step 7: Store the repaired keys
+                storeKeyPair(restoredKeyPairInfo)
+
+                // Step 8: Verify the stored keys
+                if (validateStoredKeys()) {
+                    Log.d(TAG, "✅ Keys successfully repaired and validated")
+                    return true
+                } else {
+                    Log.e(TAG, "❌ Repaired keys failed final validation")
+                    clearStoredKeys()
+                    return false
+                }
+            } else {
+                Log.w(TAG, "⚠️ No backup keys found for user: $userEmail")
+
+                // Step 9: Try to recover from SharedPreferences as last resort
+                return tryRecoverFromLegacyStorage(userEmail)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error during key repair: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Try to recover keys from legacy/alternative storage locations
+     */
+    private fun tryRecoverFromLegacyStorage(userEmail: String): Boolean {
+        return try {
+            Log.d(TAG, "🔍 Attempting recovery from legacy storage...")
+
+            // Check various possible storage locations
+            val sharedPrefs = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
+            val legacyPrivateKey = sharedPrefs.getString("private_key_$userEmail", null)
+            val legacyPublicKey = sharedPrefs.getString("public_key_$userEmail", null)
+
+            if (legacyPrivateKey != null && legacyPublicKey != null) {
+                Log.d(TAG, "✅ Found keys in legacy storage")
+
+                // Validate and restore
+                if (isValidPrivateKeyFormat(legacyPrivateKey) &&
+                    legacyPublicKey.startsWith("0x")) {
+
+                    val voterAddress = try {
+                        val cleanPublicKey = legacyPublicKey.substring(2)
+                        val publicKeyBigInt = BigInteger(cleanPublicKey, 16)
+                        val addressHex = org.web3j.crypto.Keys.getAddress(publicKeyBigInt)
+                        org.web3j.crypto.Keys.toChecksumAddress("0x" + addressHex)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Failed to derive address from legacy key: ${e.message}")
+                        return false
+                    }
+
+                    val recoveredKeyPairInfo = KeyPairInfo(
+                        publicKey = legacyPublicKey,
+                        privateKey = legacyPrivateKey,
+                        voterAddress = voterAddress,
+                        generationMethod = "Recovered_From_Legacy"
+                    )
+
+                    try {
+                        validateKeyPair(recoveredKeyPairInfo)
+                        storeKeyPair(recoveredKeyPairInfo)
+
+                        if (validateStoredKeys()) {
+                            Log.d(TAG, "✅ Keys successfully recovered from legacy storage")
+                            return true
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Legacy key validation failed: ${e.message}")
+                    }
+                }
+            }
+
+            Log.w(TAG, "⚠️ No valid keys found in any storage location")
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error during legacy recovery: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Force reload keys from encrypted storage and refresh internal state
+     * @return Boolean - true jika berhasil reload, false jika gagal
+     */
+    fun forceReloadKeys(): Boolean {
+        return try {
+            Log.d(TAG, "🔄 Force reloading keys from encrypted storage...")
+
+            // Step 1: Check if encrypted storage has keys
+            if (!hasStoredKeyPair()) {
+                Log.w(TAG, "❌ No keys found in encrypted storage")
+                return false
+            }
+
+            // Step 2: Force reload each key component
+            val privateKey = try {
+                val encryptedData = encryptedSharedPreferences.getString(ENCRYPTED_PRIVATE_KEY_KEY, null)
+                val iv = encryptedSharedPreferences.getString(IV_KEY, null)
+
+                if (encryptedData != null && iv != null) {
+                    val decryptedKey = doubleDecryptPrivateKey(encryptedData, iv)
+                    if (isValidPrivateKeyFormat(decryptedKey)) {
+                        decryptedKey
+                    } else {
+                        Log.e(TAG, "❌ Decrypted private key has invalid format")
+                        null
+                    }
+                } else {
+                    Log.e(TAG, "❌ Missing encrypted private key or IV")
+                    null
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to decrypt private key: ${e.message}")
+                null
+            }
+
+            val publicKey = try {
+                encryptedSharedPreferences.getString(PUBLIC_KEY_KEY, null)
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to load public key: ${e.message}")
+                null
+            }
+
+            val voterAddress = try {
+                encryptedSharedPreferences.getString(VOTER_ADDRESS_KEY, null)
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to load voter address: ${e.message}")
+                null
+            }
+
+            // Step 3: Validate that all keys were loaded successfully
+            if (privateKey == null || publicKey == null || voterAddress == null) {
+                Log.e(TAG, "❌ Failed to reload one or more keys")
+                Log.e(TAG, "Private key: ${if (privateKey != null) "✅" else "❌"}")
+                Log.e(TAG, "Public key: ${if (publicKey != null) "✅" else "❌"}")
+                Log.e(TAG, "Voter address: ${if (voterAddress != null) "✅" else "❌"}")
+                return false
+            }
+
+            // Step 4: Validate key formats
+            if (!isValidPrivateKeyFormat(privateKey)) {
+                Log.e(TAG, "❌ Reloaded private key has invalid format")
+                return false
+            }
+
+            if (!publicKey.startsWith("0x") || publicKey.length < 130) {
+                Log.e(TAG, "❌ Reloaded public key has invalid format")
+                return false
+            }
+
+            if (!voterAddress.startsWith("0x") || voterAddress.length != 42) {
+                Log.e(TAG, "❌ Reloaded voter address has invalid format")
+                return false
+            }
+
+            // Step 5: Verify consistency between public key and voter address
+            val derivedAddress = try {
+                val cleanPublicKey = if (publicKey.startsWith("0x")) {
+                    publicKey.substring(2)
+                } else {
+                    publicKey
+                }
+                val publicKeyBigInt = BigInteger(cleanPublicKey, 16)
+                val addressHex = org.web3j.crypto.Keys.getAddress(publicKeyBigInt)
+                org.web3j.crypto.Keys.toChecksumAddress("0x" + addressHex)
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to derive address for consistency check: ${e.message}")
+                null
+            }
+
+            if (derivedAddress != null && !derivedAddress.equals(voterAddress, ignoreCase = true)) {
+                Log.w(TAG, "⚠️ Address inconsistency detected during reload")
+                Log.w(TAG, "Stored: $voterAddress")
+                Log.w(TAG, "Derived: $derivedAddress")
+
+                // Fix the inconsistency
+                try {
+                    encryptedSharedPreferences.edit().apply {
+                        putString(VOTER_ADDRESS_KEY, derivedAddress)
+                        apply()
+                    }
+                    Log.d(TAG, "✅ Address inconsistency fixed during reload")
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Failed to fix address inconsistency: ${e.message}")
+                    return false
+                }
+            }
+
+            // Step 6: Update metadata to indicate reload
+            try {
+                encryptedSharedPreferences.edit().apply {
+                    putLong("last_reload_time", System.currentTimeMillis())
+                    putString("last_reload_method", "Force_Reload")
+                    apply()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Failed to update reload metadata: ${e.message}")
+                // Don't fail the reload for metadata issues
+            }
+
+            // Step 7: Final validation
+            if (validateStoredKeys()) {
+                Log.d(TAG, "✅ Keys successfully force reloaded and validated")
+                return true
+            } else {
+                Log.e(TAG, "❌ Force reloaded keys failed final validation")
+                return false
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error during force reload: ${e.message}", e)
+            false
+        }
     }
 }

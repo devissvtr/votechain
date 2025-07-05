@@ -112,7 +112,7 @@ fun AccountDetailsScreen(
             Log.d("AccountDetails", "📦 Loading minimal account data with key recovery...")
 
             // Get local voter data
-            val localVoterData = voterRepository.getVoterDataLocally()
+            val localVoterData = voterRepository.getVoterData()
             val walletInfo = voterRepository.getCompleteWalletInfo()
 
             // Try to get keys from both storages
@@ -676,7 +676,7 @@ fun AccountDetailsScreen(
                         textStyle = AppTypography.heading5Regular,
                         trailingIcon = {
                             IconButton(onClick = {
-                                copyToClipboard(accountData.publicKey, "Public Key")
+                                copyToClipboard(accountData.voterAddress, "Public Key")
                             }) {
                                 Icon(
                                     painter = painterResource(id = R.drawable.copy),

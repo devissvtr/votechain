@@ -65,6 +65,7 @@ import com.nocturna.votechain.viewmodel.UserProfileViewModel
 import com.nocturna.votechain.viewmodel.login.LoginViewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import com.nocturna.votechain.data.model.VoterData
 import com.nocturna.votechain.data.model.WalletInfo
 import com.nocturna.votechain.data.repository.UserLoginRepository
 import com.nocturna.votechain.data.repository.UserProfileRepository
@@ -116,7 +117,7 @@ fun ProfileScreen(
 
     // State untuk profile data
     var completeUserProfile by remember { mutableStateOf(userProfileRepository.getSavedCompleteProfile()) }
-    var fallbackVoterData by remember { mutableStateOf(voterRepository.getVoterDataLocally()) }
+    var fallbackVoterData by remember { mutableStateOf<VoterData?>(null) }
     var walletInfo by remember { mutableStateOf(WalletInfo()) }
     var dataLoadError by remember { mutableStateOf<String?>(null) }
     var isLoadingWallet by remember { mutableStateOf(true) }

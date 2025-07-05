@@ -66,8 +66,8 @@ fun WalletImportScreen(
     val privateKey by viewModel.privateKey.collectAsState()
     val password by viewModel.password.collectAsState()
     val confirmPassword by viewModel.confirmPassword.collectAsState()
-    val isPrivateKeyVisible by viewModel.isPrivateKeyVisible.collectAsState()
-    val isPasswordVisible by viewModel.isPasswordVisible.collectAsState()
+    val isPrivateKeyVisible by viewModel.privateKeyVisible.collectAsState()
+    val isPasswordVisible by viewModel.passwordVisible.collectAsState()
     val privateKeyError by viewModel.privateKeyError.collectAsState()
     val passwordError by viewModel.passwordError.collectAsState()
 
