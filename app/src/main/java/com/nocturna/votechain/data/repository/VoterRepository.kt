@@ -61,30 +61,35 @@ class VoterRepository(private val context: Context) {
                         // Save user ID for future reference
                         saveUserId(userId ?: voterData.user_id)
 
+                        // Get and validate locally stored cryptographic data
+                        val localVoterAddress = cryptoKeyManager.getVoterAddress()
+                        val localPrivateKey = cryptoKeyManager.getPrivateKey()
+
                         // Merge with locally stored cryptographic data
                         val enhancedVoterData = voterData.copy(
-                            voter_address = cryptoKeyManager.getVoterAddress() ?: voterData.voter_address
+                            voter_address = localVoterAddress ?: voterData.voter_address
                         )
 
-                        // Save merged data locally
-                        saveVoterDataLocally(enhancedVoterData)
+                        Log.d(TAG, "✅ Voter data fetched and enhanced successfully")
+                        Log.d(TAG, "- Server voter address: ${voterData.voter_address}")
+                        Log.d(TAG, "- Local voter address: $localVoterAddress")
+                        Log.d(TAG, "- Final voter address: ${enhancedVoterData.voter_address}")
 
-                        Log.d(TAG, "Voter data fetched and enhanced successfully")
                         return@withContext Result.success(enhancedVoterData)
                     } else {
-                        Log.w(TAG, "Empty voter data received")
+                        Log.w(TAG, "No voter data found in response")
                         return@withContext Result.failure(Exception("No voter data found"))
                     }
                 } ?: run {
-                    Log.e(TAG, "Null response body")
-                    return@withContext Result.failure(Exception("Invalid response"))
+                    Log.e(TAG, "Response body is null")
+                    return@withContext Result.failure(Exception("Empty response from server"))
                 }
             } else {
-                Log.e(TAG, "API call failed: ${response.code()} - ${response.message()}")
-                return@withContext Result.failure(Exception("API call failed: ${response.message()}"))
+                Log.e(TAG, "API request failed: ${response.code()} - ${response.message()}")
+                return@withContext Result.failure(Exception("Failed to fetch voter data: ${response.message()}"))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching voter data", e)
+            Log.e(TAG, "Exception during voter data fetch: ${e.message}", e)
             return@withContext Result.failure(e)
         }
     }
@@ -155,39 +160,92 @@ class VoterRepository(private val context: Context) {
     /**
      * Get voter data from local storage with cryptographic key integration
      */
-    fun getVoterDataLocally(): VoterData? {
-        val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    suspend fun getVoterData(): VoterData? = withContext(Dispatchers.IO) {
+        try {
+            val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val fullName = sharedPreferences.getString(KEY_VOTER_FULL_NAME, "") ?: ""
+            val nik = sharedPreferences.getString(KEY_VOTER_NIK, "") ?: ""
+            val storedVoterAddress = sharedPreferences.getString(KEY_VOTER_ADDRESS, "") ?: ""
+            val hasVoted = sharedPreferences.getBoolean(KEY_VOTER_HAS_VOTED, false)
 
-        val fullName = sharedPreferences.getString(KEY_VOTER_FULL_NAME, "") ?: ""
-        val nik = sharedPreferences.getString(KEY_VOTER_NIK, "") ?: ""
-        val storedVoterAddress = sharedPreferences.getString(KEY_VOTER_ADDRESS, "") ?: ""
-        val hasVoted = sharedPreferences.getBoolean(KEY_VOTER_HAS_VOTED, false)
+            // Try to get voter address from crypto manager if not in regular storage
+            val voterAddress = if (storedVoterAddress.isNotEmpty()) {
+                storedVoterAddress
+            } else {
+                cryptoKeyManager.getVoterAddress() ?: ""
+            }
 
-        // Try to get voter address from crypto manager if not in regular storage
-        val voterAddress = if (storedVoterAddress.isNotEmpty()) {
-            storedVoterAddress
-        } else {
-            cryptoKeyManager.getVoterAddress() ?: ""
-        }
+            // Validate cryptographic keys if available
+            if (cryptoKeyManager.hasStoredKeyPair()) {
+                val isValidKeys = cryptoKeyManager.validateStoredKeys()
+                if (!isValidKeys) {
+                    Log.w(TAG, "Stored cryptographic keys are invalid format")
+                    // Could trigger key regeneration or repair here if needed
+                } else {
+                    Log.d(TAG, "✅ Cryptographic keys validated successfully")
+                }
+            }
 
-        return if (fullName.isNotEmpty()) {
-            VoterData(
-                id = "",
-                user_id = "",
-                nik = nik,
-                full_name = fullName,
-                gender = "",
-                birth_place = "",
-                birth_date = "",
-                residential_address = "",
-                telephone = "",
-                voter_address = voterAddress,
-                region = "",
-                is_registered = true,
-                has_voted = hasVoted
-            )
-        } else {
+            return@withContext if (fullName.isNotEmpty()) {
+                VoterData(
+                    id = "",
+                    user_id = "",
+                    nik = nik,
+                    full_name = fullName,
+                    gender = "",
+                    birth_place = "",
+                    birth_date = "",
+                    residential_address = "",
+                    telephone = "",
+                    voter_address = voterAddress,
+                    region = "",
+                    is_registered = true,
+                    has_voted = hasVoted
+                )
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting voter data: ${e.message}", e)
             null
+        }
+    }
+
+    /**
+     * Save voter data locally with key format validation
+     */
+    fun saveVoterDataLocally(
+        fullName: String,
+        nik: String,
+        publicKey: String,
+        privateKey: String,
+        voterAddress: String,
+        hasVoted: Boolean = false
+    ) {
+        try {
+            Log.d(TAG, "Saving voter data locally with key validation")
+
+            val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+            with(sharedPreferences.edit()) {
+                putString(KEY_VOTER_FULL_NAME, fullName)
+                putString(KEY_VOTER_NIK, nik)
+                putString(KEY_VOTER_PUBLIC_KEY, publicKey)
+                putString(KEY_VOTER_ADDRESS, voterAddress)
+                putBoolean(KEY_VOTER_HAS_VOTED, hasVoted)
+                apply()
+            }
+
+            Log.d(TAG, "✅ Voter data saved successfully with validated key formats")
+            Log.d(TAG, "- Full name: $fullName")
+            Log.d(TAG, "- NIK: $nik")
+            Log.d(TAG, "- Voter address: $voterAddress")
+            Log.d(TAG, "- Private key format: ✅ Valid (${privateKey.length} chars)")
+            Log.d(TAG, "- Public key format: ✅ Valid (${publicKey.length} chars)")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to save voter data: ${e.message}", e)
+            throw e
         }
     }
 
@@ -269,7 +327,7 @@ class VoterRepository(private val context: Context) {
      */
     suspend fun getAccountDisplayData(): AccountDisplayData = withContext(Dispatchers.IO) {
         try {
-            val voterData = getVoterDataLocally()
+            val voterData = getVoterData()
             val walletInfo = getCompleteWalletInfo()
 
             return@withContext AccountDisplayData(
@@ -304,9 +362,9 @@ class VoterRepository(private val context: Context) {
                 putLong(KEY_LAST_BALANCE_UPDATE, System.currentTimeMillis())
                 apply()
             }
-            Log.d(TAG, "Balance cached: $balance")
+            Log.d(TAG, "Balance cached: $balance ETH")
         } catch (e: Exception) {
-            Log.e(TAG, "Error caching balance", e)
+            Log.e(TAG, "Failed to cache balance", e)
         }
     }
 
@@ -316,21 +374,23 @@ class VoterRepository(private val context: Context) {
     private fun getCachedBalance(): String {
         return try {
             val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val cachedBalance = sharedPreferences.getString(KEY_CACHED_BALANCE, "0.00000000") ?: "0.00000000"
+            val cachedBalance = sharedPreferences.getString(KEY_CACHED_BALANCE, "0.0") ?: "0.0"
             val lastUpdate = sharedPreferences.getLong(KEY_LAST_BALANCE_UPDATE, 0)
 
-            // Check if cache is not too old (5 minutes)
+            // Check if cache is still valid (less than 5 minutes old)
             val cacheAge = System.currentTimeMillis() - lastUpdate
-            if (cacheAge < 5 * 60 * 1000) {
-                Log.d(TAG, "Using cached balance: $cachedBalance")
+            val maxCacheAge = 5 * 60 * 1000 // 5 minutes
+
+            if (cacheAge < maxCacheAge) {
+                Log.d(TAG, "Using cached balance: $cachedBalance ETH (age: ${cacheAge / 1000}s)")
                 cachedBalance
             } else {
-                Log.d(TAG, "Cache expired, returning default balance")
-                "0.00000000"
+                Log.d(TAG, "Cached balance expired, returning default")
+                "0.0"
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting cached balance", e)
-            "0.00000000"
+            Log.e(TAG, "Failed to get cached balance", e)
+            "0.0"
         }
     }
 

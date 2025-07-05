@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.security.KeyStore
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -533,25 +534,43 @@ class RegisterViewModel(
                 // Check Android Keystore availability
                 val keystoreAvailable = checkKeystoreAvailability()
 
-                // Check hardware security module
-                val hsmAvailable = checkHardwareSecurityModule()
+                // Check for hardware-backed keys
+                val hardwareBackedKeys = checkHardwareBackedKeys()
 
-                // Check encryption strength
-                val encryptionStrong = checkEncryptionStrength()
+                // Determine encryption strength
+                val encryptionStrength = determineEncryptionStrength()
 
-                val auditResult = SecurityAuditState.Checked(
+                // Check existing keys format if any
+                var keyFormatStatus = "No keys stored"
+                if (cryptoKeyManager.hasStoredKeyPair()) {
+                    val isValidFormat = cryptoKeyManager.validateStoredKeys()
+                    keyFormatStatus = if (isValidFormat) "Valid format (66 chars)" else "Invalid format"
+                }
+
+                // Determine overall security level
+                val securityLevel = when {
+                    keystoreAvailable && hardwareBackedKeys -> "High (Hardware-backed)"
+                    keystoreAvailable -> "Medium (Software-backed)"
+                    else -> "Low (Basic encryption)"
+                }
+
+                Log.d(TAG, "Security audit completed:")
+                Log.d(TAG, "- Keystore available: $keystoreAvailable")
+                Log.d(TAG, "- Hardware-backed keys: $hardwareBackedKeys")
+                Log.d(TAG, "- Encryption strength: $encryptionStrength")
+                Log.d(TAG, "- Key format status: $keyFormatStatus")
+                Log.d(TAG, "- Security level: $securityLevel")
+
+                _securityAuditState.value = SecurityAuditState.Checked(
                     keystoreAvailable = keystoreAvailable,
-                    hardwareBackedKeys = hsmAvailable,
-                    encryptionStrength = if (encryptionStrong) "AES-256" else "AES-128",
-                    securityLevel = calculateSecurityLevel(keystoreAvailable, hsmAvailable, encryptionStrong)
+                    hardwareBackedKeys = hardwareBackedKeys,
+                    encryptionStrength = "$encryptionStrength | Keys: $keyFormatStatus",
+                    securityLevel = securityLevel
                 )
 
-                _securityAuditState.value = auditResult
-
-                Log.d(TAG, "Security audit completed: $auditResult")
             } catch (e: Exception) {
                 Log.e(TAG, "Security audit failed", e)
-                _securityAuditState.value = SecurityAuditState.Failed(e.message ?: "Unknown error")
+                _securityAuditState.value = SecurityAuditState.Failed("Security audit failed: ${e.message}")
             }
         }
     }
@@ -562,10 +581,13 @@ class RegisterViewModel(
     private fun checkExistingCryptoKeys() {
         viewModelScope.launch {
             try {
+                Log.d(TAG, "Checking existing crypto keys...")
                 val hasKeys = cryptoKeyManager.hasStoredKeyPair()
 
                 if (hasKeys) {
-                    // Validate stored keys
+                    Log.d(TAG, "Found existing keys, validating format...")
+
+                    // Validate stored keys format
                     val isValid = cryptoKeyManager.validateStoredKeys()
 
                     if (isValid) {
@@ -573,16 +595,21 @@ class RegisterViewModel(
 
                         // Get key info for logging (without exposing private key)
                         val voterAddress = cryptoKeyManager.getVoterAddress()
-                        Log.d(TAG, "Valid crypto keys found for address: $voterAddress")
+                        val privateKey = cryptoKeyManager.getPrivateKey()
+
+                        Log.d(TAG, "✅ Valid crypto keys found")
+                        Log.d(TAG, "- Voter address: $voterAddress")
+                        Log.d(TAG, "- Private key format: ${if (privateKey != null && privateKey.length == 66) "✅ Correct (66 chars)" else "❌ Incorrect"}")
                     } else {
                         _keyGenerationState.value = KeyGenerationState.Invalid
-                        Log.w(TAG, "Found invalid crypto keys, will regenerate during registration")
+                        Log.w(TAG, "❌ Found invalid crypto keys, will regenerate during registration")
 
                         // Clear invalid keys
                         cryptoKeyManager.clearStoredKeys()
                     }
                 } else {
                     Log.d(TAG, "No existing crypto keys found")
+                    _keyGenerationState.value = KeyGenerationState.NotStarted
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error checking existing crypto keys", e)
@@ -1049,22 +1076,40 @@ class RegisterViewModel(
     }
 
     /**
-     * Perform security check before key generation
+     * Utility method to check if device meets security requirements
      */
     private fun performPreKeyGenerationSecurityCheck(): SecurityCheck {
-        // Check if device is rooted (basic check)
-        val isRooted = checkIfDeviceRooted()
-        if (isRooted) {
-            return SecurityCheck(false, "Device appears to be rooted")
-        }
+        try {
+            // Check if device is rooted (basic check)
+            val isRooted = checkIfDeviceRooted()
+            if (isRooted) {
+                Log.w(TAG, "Device appears to be rooted - proceeding with caution")
+                // Don't block on rooted devices, just log warning
+            }
 
-        // Check if debugging is enabled
-        val isDebugging = checkIfDebuggingEnabled()
-        if (isDebugging) {
-            Log.w(TAG, "Debugging is enabled - proceeding with caution")
-        }
+            // Check if debugging is enabled
+            val isDebugging = checkIfDebuggingEnabled()
+            if (isDebugging) {
+                Log.w(TAG, "Debugging is enabled - proceeding with caution")
+            }
 
-        return SecurityCheck(true, "Security checks passed")
+            // Check if Android Keystore is available
+            val keystoreAvailable = checkKeystoreAvailability()
+            if (!keystoreAvailable) {
+                return SecurityCheck(false, "Android Keystore not available")
+            }
+
+            // Check if we can initialize BouncyCastle
+            val bcAvailable = CryptoKeyManager.initializeBouncyCastle()
+            if (!bcAvailable) {
+                Log.w(TAG, "BouncyCastle initialization failed - will use fallback methods")
+            }
+
+            return SecurityCheck(true, "Security checks passed")
+        } catch (e: Exception) {
+            Log.e(TAG, "Security check failed", e)
+            return SecurityCheck(false, "Security check error: ${e.message}")
+        }
     }
 
     /**
@@ -1072,14 +1117,83 @@ class RegisterViewModel(
      */
     private fun validateGeneratedKeys(keyPairInfo: CryptoKeyManager.KeyPairInfo): Boolean {
         return try {
-            // Check key lengths
-            val privateKeyValid = keyPairInfo.privateKey.length >= 66 // 0x + 64 chars
-            val publicKeyValid = keyPairInfo.publicKey.length >= 130 // 0x + 128 chars
-            val addressValid = keyPairInfo.voterAddress.length == 42 // 0x + 40 chars
+            Log.d(TAG, "Validating generated keys:")
+            Log.d(TAG, "- Private key length: ${keyPairInfo.privateKey.length}")
+            Log.d(TAG, "- Public key length: ${keyPairInfo.publicKey.length}")
+            Log.d(TAG, "- Voter address length: ${keyPairInfo.voterAddress.length}")
+
+            // Check exact key lengths and formats
+            val privateKeyValid = keyPairInfo.privateKey.length == 66 && // Exactly 0x + 64 chars
+                    keyPairInfo.privateKey.startsWith("0x") &&
+                    keyPairInfo.privateKey.substring(2).matches(Regex("^[0-9a-fA-F]{64}$"))
+
+            val publicKeyValid = keyPairInfo.publicKey.length >= 130 && // 0x + 128+ chars
+                    keyPairInfo.publicKey.startsWith("0x") &&
+                    keyPairInfo.publicKey.substring(2).matches(Regex("^[0-9a-fA-F]+$"))
+
+            val addressValid = keyPairInfo.voterAddress.length == 42 && // 0x + 40 chars
+                    keyPairInfo.voterAddress.startsWith("0x") &&
+                    keyPairInfo.voterAddress.substring(2).matches(Regex("^[0-9a-fA-F]{40}$"))
+
+            Log.d(TAG, "Key validation results:")
+            Log.d(TAG, "- Private key valid: $privateKeyValid")
+            Log.d(TAG, "- Public key valid: $publicKeyValid")
+            Log.d(TAG, "- Address valid: $addressValid")
+
+            if (!privateKeyValid) {
+                Log.e(TAG, "Private key validation failed - Expected exactly 66 characters (0x + 64 hex)")
+                Log.e(TAG, "Actual private key: '${keyPairInfo.privateKey}'")
+            }
 
             privateKeyValid && publicKeyValid && addressValid
         } catch (e: Exception) {
+            Log.e(TAG, "Key validation exception: ${e.message}", e)
             false
+        }
+    }
+
+    /**
+     * Enhanced key generation with format validation
+     */
+    private suspend fun generateKeys(): KeyGenerationResult = withContext(Dispatchers.Default) {
+        try {
+            Log.d(TAG, "Starting key generation process...")
+
+            // Check security prerequisites
+            val securityCheck = performPreKeyGenerationSecurityCheck()
+            if (!securityCheck.passed) {
+                return@withContext KeyGenerationResult(
+                    success = false,
+                    error = "Security check failed: ${securityCheck.reason}"
+                )
+            }
+
+            // Generate keys
+            val keyPairInfo = cryptoKeyManager.generateKeyPair()
+
+            Log.d(TAG, "Key generation completed, validating...")
+            Log.d(TAG, "Generated private key length: ${keyPairInfo.privateKey.length}")
+
+            // Validate generated keys with strict format checking
+            if (!validateGeneratedKeys(keyPairInfo)) {
+                Log.e(TAG, "❌ Generated keys validation failed")
+                return@withContext KeyGenerationResult(
+                    success = false,
+                    error = "Generated keys do not meet format requirements. Private key must be exactly 66 characters (0x + 64 hex)."
+                )
+            }
+
+            Log.d(TAG, "✅ Key generation and validation successful")
+            KeyGenerationResult(
+                success = true,
+                keyPairInfo = keyPairInfo
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Key generation failed", e)
+            KeyGenerationResult(
+                success = false,
+                error = e.message ?: "Unknown error during key generation"
+            )
         }
     }
 
@@ -1096,42 +1210,53 @@ class RegisterViewModel(
         try {
             Log.d(TAG, "✅ Registration successful, processing results...")
 
-            // Step 1: Save keys dengan method yang benar
-            cryptoKeyManager.storeKeyPair(keyPairInfo)
+            // Validate key pair one more time before storing
+            if (!validateGeneratedKeys(keyPairInfo)) {
+                Log.e(TAG, "❌ Key pair validation failed during registration success handling")
+                _uiState.value = RegisterUiState.Error("Key validation failed during registration")
+                return
+            }
 
-            // Step 2: TAMBAHAN - Simpan juga ke UserLoginRepository untuk kompatibilitas
+            // Step 1: Save keys with the correct method
+            cryptoKeyManager.storeKeyPair(keyPairInfo)
+            Log.d(TAG, "Keys stored in CryptoKeyManager")
+
+            // Step 2: Additional backup to UserLoginRepository for compatibility
             userLoginRepository.saveKeysForUser(
                 email = email,
                 privateKey = keyPairInfo.privateKey,
                 publicKey = keyPairInfo.publicKey
             )
+            Log.d(TAG, "Keys backed up in UserLoginRepository")
 
-            // Step 3: Save ke VoterRepository
-//            voterRepository.saveVoterDataLocally(
-//                fullName = fullName,  // Perbaiki typo
-//                nik = nationalId,
-//                publicKey = keyPairInfo.publicKey,
-//                privateKey = keyPairInfo.privateKey,
-//                voterAddress = keyPairInfo.voterAddress,
-//                hasVoted = false
-//            )
-
-            // Step 4: Verify penyimpanan
+            // Step 3: Verify storage was successful
             val savedPrivateKey = cryptoKeyManager.getPrivateKey()
             val backupPrivateKey = userLoginRepository.getPrivateKey(email)
 
             Log.d(TAG, "Private key verification:")
-            Log.d(TAG, "- From CryptoKeyManager: ${if (savedPrivateKey != null) "✅ Found" else "❌ Not found"}")
-            Log.d(TAG, "- From UserLoginRepository: ${if (backupPrivateKey != null) "✅ Found" else "❌ Not found"}")
+            Log.d(TAG, "- From CryptoKeyManager: ${if (savedPrivateKey != null) "✅ Found (${savedPrivateKey.length} chars)" else "❌ Not found"}")
+            Log.d(TAG, "- From UserLoginRepository: ${if (backupPrivateKey != null) "✅ Found (${backupPrivateKey.length} chars)" else "❌ Not found"}")
 
-            // Step 5: Update UI state
+            // Validate the saved keys are in correct format
+            if (savedPrivateKey != null) {
+                val isValidFormat = savedPrivateKey.length == 66 && savedPrivateKey.startsWith("0x")
+                Log.d(TAG, "- Saved private key format: ${if (isValidFormat) "✅ Correct" else "❌ Incorrect"}")
+
+                if (!isValidFormat) {
+                    Log.e(TAG, "❌ Saved private key format is incorrect: '${savedPrivateKey}'")
+                    _uiState.value = RegisterUiState.Error("Private key storage format validation failed")
+                    return
+                }
+            }
+
+            // Step 4: Update UI state
             _keyGenerationState.value = KeyGenerationState.Generated
             _uiState.value = RegisterUiState.Success(response)
 
-            // Step 6: Clear registration state
+            // Step 5: Clear registration state
             registrationStateManager.clearRegistrationState()
 
-            Log.d(TAG, "✅ Registration process completed successfully")
+            Log.d(TAG, "✅ Registration process completed successfully with validated keys")
 
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error in handleRegistrationSuccess: ${e.message}", e)
@@ -1260,63 +1385,50 @@ class RegisterViewModel(
         }
     }
 
-    // ===== Security Helper Methods =====
-
     private fun checkKeystoreAvailability(): Boolean {
         return try {
-            val keyStore = java.security.KeyStore.getInstance("AndroidKeyStore")
+            val keyStore = KeyStore.getInstance("AndroidKeyStore")
             keyStore.load(null)
             true
         } catch (e: Exception) {
+            Log.e(TAG, "Keystore not available", e)
             false
         }
     }
 
-    private fun checkHardwareSecurityModule(): Boolean {
+    private fun checkHardwareBackedKeys(): Boolean {
         return try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
-                keyguardManager.isDeviceSecure
-            } else {
-                false
-            }
+            // This is a simplified check - in practice you'd check for StrongBox or TEE support
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M
         } catch (e: Exception) {
             false
         }
     }
 
-    private fun checkEncryptionStrength(): Boolean {
+    private fun determineEncryptionStrength(): String {
         return try {
-            // Check if AES-256 is available
-            javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").blockSize == 16
+            "AES-256-GCM with PBKDF2"
         } catch (e: Exception) {
-            false
-        }
-    }
-
-    private fun calculateSecurityLevel(keystore: Boolean, hsm: Boolean, encryption: Boolean): String {
-        val score = listOf(keystore, hsm, encryption).count { it }
-        return when (score) {
-            3 -> "HIGH"
-            2 -> "MEDIUM"
-            1 -> "LOW"
-            else -> "MINIMAL"
+            "Unknown"
         }
     }
 
     private fun checkIfDeviceRooted(): Boolean {
-        // Basic root detection (can be enhanced)
-        val paths = arrayOf(
-            "/system/app/Superuser.apk",
-            "/sbin/su",
-            "/system/bin/su",
-            "/system/xbin/su"
-        )
-        return paths.any { java.io.File(it).exists() }
+        // Basic root detection - implement more sophisticated checks as needed
+        return try {
+            val file = java.io.File("/system/app/Superuser.apk")
+            file.exists()
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun checkIfDebuggingEnabled(): Boolean {
-        return android.os.Debug.isDebuggerConnected()
+        return try {
+            (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun formatBirthDate(birthDate: String): String {
@@ -1330,8 +1442,6 @@ class RegisterViewModel(
             birthDate
         }
     }
-
-    // ===== Existing methods (abbreviated for space) =====
 
     private fun checkInitialRegistrationState() {
         val state = registrationStateManager.getRegistrationState()

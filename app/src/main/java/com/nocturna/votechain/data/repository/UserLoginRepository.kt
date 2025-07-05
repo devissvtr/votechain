@@ -261,7 +261,7 @@ class UserLoginRepository(private val context: Context) {
         val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         with(sharedPreferences.edit()) {
             putString(KEY_USER_TOKEN, userData.token)
-            putString(KEY_USER_EMAIL, email) // Save the email used for login
+            putString(KEY_USER_EMAIL, email)
             putString(KEY_USER_EXPIRES_AT, userData.expires_at)
             apply()
         }
