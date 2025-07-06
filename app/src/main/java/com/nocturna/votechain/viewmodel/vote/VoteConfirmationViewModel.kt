@@ -29,27 +29,42 @@ class VoteConfirmationViewModel(
 
     /**
      * Cast the vote using the verified OTP token
+     * This method now properly accepts parameters from the UI
+     *
+     * @param electionPairId The ID of the election pair to vote for
+     * @param region The voter's region
+     * @param otpToken The OTP token for verification
      */
-    fun castVote() {
+    fun castVote(electionPairId: String, region: String, otpToken: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-            // Get stored region or use default
-            val region = getStoredRegion() ?: "default"
+            Log.d(TAG, "Starting vote casting process...")
+            Log.d(TAG, "Election Pair ID: $electionPairId")
+            Log.d(TAG, "Region: $region")
+            Log.d(TAG, "OTP Token present: ${otpToken.isNotEmpty()}")
 
+            // Use the castVoteWithOTPVerification method which already handles:
+            // 1. Validation of prerequisites
+            // 2. Generation of signed transaction using private/public keys
+            // 3. Sending to /v1/vote/cast endpoint
             votingRepository.castVoteWithOTPVerification(electionPairId, region)
                 .collect { result ->
                     result.fold(
                         onSuccess = { voteResponse ->
-                            Log.d(TAG, "Vote cast successfully: ${voteResponse.message}")
+                            Log.d(TAG, "✅ Vote cast successfully!")
+                            Log.d(TAG, "Response: ${voteResponse.message}")
+                            Log.d(TAG, "Transaction Hash: ${voteResponse.data?.tx_hash}")
+
                             _uiState.value = _uiState.value.copy(
                                 isLoading = false,
                                 isVoteSuccess = true,
-                                error = null
+                                error = null,
+                                transactionHash = voteResponse.data?.tx_hash
                             )
                         },
                         onFailure = { e ->
-                            Log.e(TAG, "Vote casting failed: ${e.message}")
+                            Log.e(TAG, "❌ Vote casting failed: ${e.message}")
                             _uiState.value = _uiState.value.copy(
                                 isLoading = false,
                                 error = e.message ?: "Failed to cast vote"
@@ -60,9 +75,24 @@ class VoteConfirmationViewModel(
         }
     }
 
+    /**
+     * Alternative method without parameters for backward compatibility
+     * Uses the electionPairId from constructor
+     */
+    fun castVote() {
+        val region = getStoredRegion() ?: "default"
+        val otpToken = getStoredOtpToken() ?: ""
+        castVote(electionPairId, region, otpToken)
+    }
+
     private fun getStoredRegion(): String? {
         val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
         return sharedPreferences.getString("user_region", null)
+    }
+
+    private fun getStoredOtpToken(): String? {
+        val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
+        return sharedPreferences.getString("otp_token", null)
     }
 
     /**
@@ -89,5 +119,6 @@ class VoteConfirmationViewModel(
 data class VoteConfirmationUiState(
     val isLoading: Boolean = false,
     val isVoteSuccess: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val transactionHash: String? = null
 )

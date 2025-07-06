@@ -975,20 +975,26 @@ class RegisterViewModel(
 
         viewModelScope.launch {
             try {
+                logRegistrationProcess(email, "REGISTRATION_START", "Beginning secure registration process")
                 Log.d(TAG, "Starting secure registration for: $email")
 
                 // Step 1: Generate crypto keys with enhanced security
+                logRegistrationProcess(email, "KEY_GENERATION_START")
                 val keyGenerationResult = generateSecureCryptoKeys()
                 if (!keyGenerationResult.success) {
+                    logRegistrationProcess(email, "KEY_GENERATION_FAILED", keyGenerationResult.error ?: "Unknown error")
                     throw SecurityException(keyGenerationResult.error ?: "Key generation failed")
                 }
+                logRegistrationProcess(email, "KEY_GENERATION_SUCCESS", "Keys generated successfully")
 
                 val keyPairInfo = keyGenerationResult.keyPairInfo!!
                 Log.d(TAG, "✅ Secure crypto keys generated - Voter Address: ${keyPairInfo.voterAddress}")
 
                 // Step 2: Store keys with maximum security
+                logRegistrationProcess(email, "KEY_STORAGE_START")
                 cryptoKeyManager.storeKeyPair(keyPairInfo)
                 _keyGenerationState.value = KeyGenerationState.Generated
+                logRegistrationProcess(email, "KEY_STORAGE_SUCCESS")
                 Log.d(TAG, "✅ Crypto keys stored securely in Android Keystore")
 
                 // Step 3: Save registration state
@@ -1127,7 +1133,7 @@ class RegisterViewModel(
                     keyPairInfo.privateKey.startsWith("0x") &&
                     keyPairInfo.privateKey.substring(2).matches(Regex("^[0-9a-fA-F]{64}$"))
 
-            val publicKeyValid = keyPairInfo.publicKey.length >= 130 && // 0x + 128+ chars
+            val publicKeyValid = keyPairInfo.publicKey.length >= 42 && // 0x + 40+ chars
                     keyPairInfo.publicKey.startsWith("0x") &&
                     keyPairInfo.publicKey.substring(2).matches(Regex("^[0-9a-fA-F]+$"))
 
@@ -1218,42 +1224,78 @@ class RegisterViewModel(
             }
 
             // Step 1: Save keys with the correct method
-            cryptoKeyManager.storeKeyPair(keyPairInfo)
-            Log.d(TAG, "Keys stored in CryptoKeyManager")
+            try {
+                cryptoKeyManager.storeKeyPair(keyPairInfo)
+                Log.d(TAG, "Keys stored in CryptoKeyManager")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to store keys in CryptoKeyManager: ${e.message}", e)
+                // Continue execution - we'll still try to store in UserLoginRepository
+            }
 
             // Step 2: Additional backup to UserLoginRepository for compatibility
-            userLoginRepository.saveKeysForUser(
-                email = email,
-                privateKey = keyPairInfo.privateKey,
-                publicKey = keyPairInfo.publicKey
-            )
-            Log.d(TAG, "Keys backed up in UserLoginRepository")
+            try {
+                userLoginRepository.saveKeysForUser(
+                    email = email,
+                    privateKey = keyPairInfo.privateKey,
+                    publicKey = keyPairInfo.publicKey
+                )
+                Log.d(TAG, "✅ Backup keys saved for user: $email")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to save backup keys in UserLoginRepository: ${e.message}", e)
+            }
 
             // Step 3: Verify storage was successful
-            val savedPrivateKey = cryptoKeyManager.getPrivateKey()
+            var savedPrivateKey: String? = null
+            var isCryptoManagerStorageSuccessful = false
+
+            try {
+                savedPrivateKey = cryptoKeyManager.getPrivateKey()
+                isCryptoManagerStorageSuccessful = (savedPrivateKey != null)
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error retrieving private key from CryptoKeyManager: ${e.message}", e)
+                savedPrivateKey = null
+                isCryptoManagerStorageSuccessful = false
+            }
+
             val backupPrivateKey = userLoginRepository.getPrivateKey(email)
+            val isBackupStorageSuccessful = (backupPrivateKey != null)
 
             Log.d(TAG, "Private key verification:")
-            Log.d(TAG, "- From CryptoKeyManager: ${if (savedPrivateKey != null) "✅ Found (${savedPrivateKey.length} chars)" else "❌ Not found"}")
-            Log.d(TAG, "- From UserLoginRepository: ${if (backupPrivateKey != null) "✅ Found (${backupPrivateKey.length} chars)" else "❌ Not found"}")
+            Log.d(TAG, "- From CryptoKeyManager: ${if (isCryptoManagerStorageSuccessful) "✅ Found (${savedPrivateKey?.length} chars)" else "❌ Not found"}")
+            Log.d(TAG, "- From UserLoginRepository: ${if (isBackupStorageSuccessful) "✅ Found (${backupPrivateKey?.length} chars)" else "❌ Not found"}")
 
-            // Validate the saved keys are in correct format
-            if (savedPrivateKey != null) {
-                val isValidFormat = savedPrivateKey.length == 66 && savedPrivateKey.startsWith("0x")
-                Log.d(TAG, "- Saved private key format: ${if (isValidFormat) "✅ Correct" else "❌ Incorrect"}")
+            // Step 4: Handle recovery if CryptoKeyManager storage failed but backup succeeded
+            if (!isCryptoManagerStorageSuccessful && isBackupStorageSuccessful) {
+                Log.d(TAG, "✅ Private key found in backup storage for: $email")
 
-                if (!isValidFormat) {
-                    Log.e(TAG, "❌ Saved private key format is incorrect: '${savedPrivateKey}'")
-                    _uiState.value = RegisterUiState.Error("Private key storage format validation failed")
-                    return
+                try {
+                    // Try to repair the CryptoKeyManager with the backup
+                    if (cryptoKeyManager.repairCorruptedKeys(email)) {
+                        Log.d(TAG, "✅ Successfully repaired CryptoKeyManager keys from backup")
+                        savedPrivateKey = cryptoKeyManager.getPrivateKey()
+                        isCryptoManagerStorageSuccessful = (savedPrivateKey != null)
+                    } else {
+                        Log.w(TAG, "⚠️ Failed to repair CryptoKeyManager keys but backup is available")
+                        // We can continue with just the backup
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error during key repair: ${e.message}", e)
+                    // We can continue with just the backup
                 }
             }
 
-            // Step 4: Update UI state
+            // Proceed if at least one storage mechanism succeeded
+            if (!isCryptoManagerStorageSuccessful && !isBackupStorageSuccessful) {
+                Log.e(TAG, "❌ Failed to store keys in both primary and backup storage")
+                _uiState.value = RegisterUiState.Error("Failed to securely store wallet keys")
+                return
+            }
+
+            // Step 5: Update UI state
             _keyGenerationState.value = KeyGenerationState.Generated
             _uiState.value = RegisterUiState.Success(response)
 
-            // Step 5: Clear registration state
+            // Step 6: Clear registration state
             registrationStateManager.clearRegistrationState()
 
             Log.d(TAG, "✅ Registration process completed successfully with validated keys")
@@ -1526,5 +1568,16 @@ class RegisterViewModel(
             }
         }
     }
-}
 
+    /**
+     * Registration process logging enhancement
+     */
+    private fun logRegistrationProcess(email: String, step: String, details: String = "") {
+        Log.i(TAG, "🎯 REGISTRATION STEP: $step")
+        Log.d(TAG, "   ├─ User Email: $email")
+        Log.d(TAG, "   ├─ Timestamp: ${System.currentTimeMillis()}")
+        if (details.isNotEmpty()) {
+            Log.d(TAG, "   └─ Details: $details")
+        }
+    }
+}

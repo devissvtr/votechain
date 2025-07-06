@@ -139,29 +139,25 @@ class UserProfileRepository(private val context: Context) {
                 response.body()?.let { voterResponse ->
                     Log.d(TAG, "Voter API response code: ${voterResponse.code}, data count: ${voterResponse.data.size}")
 
-                    if (voterResponse.code == 0) {
-                        if (voterResponse.data.isNotEmpty()) {
-                            // Debug: Log all voter data for troubleshooting
-                            voterResponse.data.forEachIndexed { index, voter ->
-                                Log.d(TAG, "Voter $index: user_id='${voter.user_id}', id='${voter.id}', name='${voter.full_name}'")
-                            }
+                    // Updated to handle both code == 0 and code == 200 (common API response codes)
+                    if ((voterResponse.code == 0 || voterResponse.code == 200) && voterResponse.data.isNotEmpty()) {
+                        // Debug: Log all voter data for troubleshooting
+                        voterResponse.data.forEachIndexed { index, voter ->
+                            Log.d(TAG, "Voter $index: user_id='${voter.user_id}', id='${voter.id}', name='${voter.full_name}'")
+                        }
 
-                            // Enhanced matching logic - try multiple approaches
-                            val matchingVoter = findMatchingVoter(voterResponse.data, userId)
+                        // Enhanced matching logic - try multiple approaches
+                        val matchingVoter = findMatchingVoter(voterResponse.data, userId)
 
-                            if (matchingVoter != null) {
-                                Log.d(TAG, "Matching voter profile found: ${matchingVoter.full_name} (user_id: ${matchingVoter.user_id})")
-                                Result.success(matchingVoter)
-                            } else {
-                                Log.w(TAG, "No voter profile found for user_id: $userId")
-                                // Log available user_ids for debugging
-                                val availableUserIds = voterResponse.data.map { it.user_id }
-                                Log.w(TAG, "Available user_ids: $availableUserIds")
-                                Result.failure(Exception("No voter profile found for this user"))
-                            }
+                        if (matchingVoter != null) {
+                            Log.d(TAG, "Matching voter profile found: ${matchingVoter.full_name} (user_id: ${matchingVoter.user_id})")
+                            Result.success(matchingVoter)
                         } else {
-                            Log.w(TAG, "Voter profile API returned empty data array")
-                            Result.failure(Exception("No voter data available"))
+                            Log.w(TAG, "No voter profile found for user_id: $userId")
+                            // Log available user_ids for debugging
+                            val availableUserIds = voterResponse.data.map { it.user_id }
+                            Log.w(TAG, "Available user_ids: $availableUserIds")
+                            Result.failure(Exception("No voter profile found for this user"))
                         }
                     } else {
                         Log.e(TAG, "Voter profile API returned error code: ${voterResponse.code}")
@@ -252,10 +248,15 @@ class UserProfileRepository(private val context: Context) {
 
             if (response.isSuccessful) {
                 response.body()?.let { voterResponse ->
-                    if (voterResponse.code == 0 && voterResponse.data.isNotEmpty()) {
-                        val voterData = voterResponse.data.first()
-                        Log.d(TAG, "Voter data fetched successfully via query: ${voterData.full_name}")
-                        Result.success(voterData)
+                    // Updated to handle both code == 0 and code == 200 (common API response codes)
+                    if ((voterResponse.code == 0 || voterResponse.code == 200) && voterResponse.data.isNotEmpty()) {
+                        // Find the voter with matching user_id
+                        val matchingVoter = voterResponse.data.find { it.user_id == userId }
+                            ?: voterResponse.data.first()
+
+
+                        Log.d(TAG, "Voter data fetched successfully via query: ${matchingVoter.full_name}")
+                        Result.success(matchingVoter)
                     } else {
                         Log.e(TAG, "Query-based voter API returned empty data or error")
                         Result.failure(Exception("No voter data available via query"))

@@ -46,6 +46,7 @@ import com.nocturna.votechain.utils.LanguageManager
 import com.nocturna.votechain.viewmodel.wallet.ImportStep
 import com.nocturna.votechain.viewmodel.wallet.WalletImportUiState
 import com.nocturna.votechain.viewmodel.wallet.WalletImportViewModel
+import com.nocturna.votechain.viewmodel.wallet.WalletImportViewModelFactory
 import kotlinx.coroutines.delay
 import com.nocturna.votechain.R
 import com.nocturna.votechain.data.network.ElectionNetworkClient.initialize
@@ -55,10 +56,11 @@ import com.nocturna.votechain.data.network.ElectionNetworkClient.initialize
 fun WalletImportScreen(
     onBackClick: () -> Unit = {},
     onSuccessClick: (String) -> Unit = {},
-    viewModel: WalletImportViewModel = viewModel()
+    viewModel: WalletImportViewModel = viewModel(
+        factory = WalletImportViewModelFactory(LocalContext.current)
+    )
 ) {
     val context = LocalContext.current
-    val actualViewModel = remember { viewModel.apply { initialize(context) } }
 
     val localizedStrings = LanguageManager.getLocalizedStrings()
     val uiState by viewModel.uiState.collectAsState()

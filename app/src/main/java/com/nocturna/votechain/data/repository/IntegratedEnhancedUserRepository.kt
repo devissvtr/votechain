@@ -137,6 +137,11 @@ class IntegratedEnhancedUserRepository(private val context: Context) {
             Log.d(TAG, "Generating validated key pair...")
 
             val keyPairInfo = cryptoKeyManager.generateKeyPair()
+            val validationReport = cryptoKeyManager.performComprehensiveKeyValidation()
+
+            if (!validationReport.overallValid) { // ← ADD THIS
+                throw SecurityException("Generated keys failed comprehensive validation")
+            }
 
             // Log generated key information for debugging
             Log.d(TAG, "Key pair generated:")

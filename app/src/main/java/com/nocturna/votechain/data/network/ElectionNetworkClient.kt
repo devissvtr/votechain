@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
  */
 object ElectionNetworkClient {
     // Public BASE_URL to be used across the app
-    const val BASE_URL = "https://1527-36-79-168-77.ngrok-free.app"
+    const val BASE_URL = "https://6f4a-36-79-168-77.ngrok-free.app"
     private const val TAG = "ElectionNetworkClient"
     private const val PREFS_NAME = "VoteChainPrefs"
     private const val KEY_USER_TOKEN = "user_token"
