@@ -81,7 +81,7 @@ fun OTPVerificationScreen(
     val isOtpComplete = otpDigits.all { it.isNotEmpty() }
 
     // Timer state
-    var remainingSeconds by remember { mutableStateOf(180) }
+    var remainingSeconds by remember { mutableStateOf(300) }
     var isTimerRunning by remember { mutableStateOf(true) }
 
     // Update timer from ViewModel state
@@ -302,7 +302,7 @@ fun OTPVerificationScreen(
                 modifier = Modifier.clickable(enabled = remainingSeconds == 0 && !uiState.isResending) {
                     if (remainingSeconds == 0) {
                         viewModel.resendOTP()
-                        remainingSeconds = 180
+                        remainingSeconds = 300
                         isTimerRunning = true
                     }
                 }

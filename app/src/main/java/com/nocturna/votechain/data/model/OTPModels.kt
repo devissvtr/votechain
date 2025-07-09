@@ -61,7 +61,7 @@ data class OTPData(
      * Helper function to get remaining time in seconds as integer
      */
     fun getRemainingTimeInSeconds(): Int {
-        return time_remaining_seconds.replace("s", "").toDoubleOrNull()?.toInt() ?: 180
+        return time_remaining_seconds.replace("s", "").toDoubleOrNull()?.toInt() ?: 300
     }
 }
 

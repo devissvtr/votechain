@@ -498,31 +498,31 @@ fun AccountDetailsScreen(
                 Column(
                     modifier = Modifier.padding(24.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Profile Information",
-                            style = AppTypography.heading4Bold,
-                            color = NeutralColors.Neutral70
-                        )
-
-                        if (!isLoading) {
-                            IconButton(
-                                onClick = { refreshVoterData() },
-                                enabled = !isRefreshing
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.back),
-                                    contentDescription = "Refresh Profile Data",
-                                    tint = if (isRefreshing) NeutralColors.Neutral40 else MainColors.Primary1,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                        }
-                    }
+//                    Row(
+//                        modifier = Modifier.fillMaxWidth(),
+//                        horizontalArrangement = Arrangement.SpaceBetween,
+//                        verticalAlignment = Alignment.CenterVertically
+//                    ) {
+//                        Text(
+//                            text = "Profile Information",
+//                            style = AppTypography.heading4Bold,
+//                            color = NeutralColors.Neutral70
+//                        )
+//
+//                        if (!isLoading) {
+//                            IconButton(
+//                                onClick = { refreshVoterData() },
+//                                enabled = !isRefreshing
+//                            ) {
+//                                Icon(
+//                                    painter = painterResource(id = R.drawable.back),
+//                                    contentDescription = "Refresh Profile Data",
+//                                    tint = if (isRefreshing) NeutralColors.Neutral40 else MainColors.Primary1,
+//                                    modifier = Modifier.size(24.dp)
+//                                )
+//                            }
+//                        }
+//                    }
 
                     Spacer(modifier = Modifier.height(20.dp))
 

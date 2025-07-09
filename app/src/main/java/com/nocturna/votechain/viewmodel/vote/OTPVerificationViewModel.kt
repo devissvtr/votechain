@@ -55,7 +55,7 @@ class OTPVerificationViewModel(
                                 isLoading = false,
                                 otpData = otpData,
                                 remainingAttempts = otpData.remaining_attempts,
-                                timeRemainingSeconds = otpData.time_remaining_seconds.toIntOrNull() ?: 180,
+                                timeRemainingSeconds = otpData.time_remaining_seconds.toIntOrNull() ?: 300,
                                 error = null
                             )
                         } ?: run {
@@ -95,7 +95,7 @@ class OTPVerificationViewModel(
                                 isResending = false,
                                 otpData = otpData,
                                 remainingAttempts = otpData.remaining_attempts,
-                                timeRemainingSeconds = otpData.time_remaining_seconds.toIntOrNull() ?: 180,
+                                timeRemainingSeconds = otpData.time_remaining_seconds.toIntOrNull() ?: 300,
                                 error = null
                             )
                         } ?: run {
@@ -227,6 +227,6 @@ data class OTPVerificationUiState(
     val otpData: OTPData? = null,
     val otpToken: String? = null,
     val remainingAttempts: Int = 3,
-    val timeRemainingSeconds: Int = 180,
+    val timeRemainingSeconds: Int = 300,
     val error: String? = null
 )

@@ -773,24 +773,27 @@ class CryptoKeyManager(private val context: Context) {
      * Double encryption for enhanced security
      */
     private fun doubleEncryptPrivateKey(privateKey: String): EncryptedData {
-        // First layer: encrypt with master key
-        val firstEncryption = encryptWithKey(privateKey, KEY_ALIAS_MASTER)
+        try {
+            // First layer: encrypt with master key
+            val firstEncryption = encryptWithKey(privateKey, KEY_ALIAS_MASTER)
 
-        // Store both IVs
-        val combinedIV = firstEncryption.iv + "::" +
-            Base64.encodeToString(firstEncryption.encryptedData.toByteArray(), Base64.NO_WRAP)
+            // Second layer: encrypt with encryption key
+            val secondEncryption = encryptWithKey(
+                firstEncryption.encryptedData,
+                KEY_ALIAS_ENCRYPTION
+            )
 
-        // Second layer: encrypt with encryption key
-        val secondEncryption = encryptWithKey(
-            Base64.encodeToString(firstEncryption.encryptedData.toByteArray(), Base64.NO_WRAP),
-            KEY_ALIAS_ENCRYPTION
-        )
+            // Store both IVs properly: firstIV::secondIV::firstEncryptedData
+            val combinedIV = "${firstEncryption.iv}::${secondEncryption.iv}::${firstEncryption.encryptedData}"
 
-        // Return the second encryption with the combined IV for proper decryption later
-        return EncryptedData(
-            encryptedData = secondEncryption.encryptedData,
-            iv = combinedIV
-        )
+            return EncryptedData(
+                encryptedData = secondEncryption.encryptedData,
+                iv = combinedIV
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Double encryption failed: ${e.message}", e)
+            throw SecurityException("Failed to encrypt data", e)
+        }
     }
 
     /**
@@ -798,19 +801,25 @@ class CryptoKeyManager(private val context: Context) {
      */
     private fun doubleDecryptPrivateKey(encryptedData: String, iv: String): String {
         try {
-            // Extract both IVs
+            // Extract both IVs and first encrypted data
             val ivParts = iv.split("::")
-            if (ivParts.size != 2) {
-                throw SecurityException("Invalid IV format for double decryption")
+            if (ivParts.size != 3) {
+                throw SecurityException("Invalid IV format for double decryption. Expected 3 parts, got ${ivParts.size}")
             }
 
-            val firstIV = ivParts[0]
-            val firstEncryptedData = ivParts[1]
+            val firstIV = ivParts[0]          // IV used with master key
+            val secondIV = ivParts[1]         // IV used with encryption key
+            val firstEncryptedData = ivParts[2]  // Result of first encryption
 
-            // First layer: decrypt with encryption key
-            val secondDecryption = decryptWithKey(encryptedData, firstIV, KEY_ALIAS_ENCRYPTION)
+            // First layer: decrypt with encryption key using its correct IV
+            val firstDecryption = decryptWithKey(encryptedData, secondIV, KEY_ALIAS_ENCRYPTION)
 
-            // Second layer: decrypt with master key
+            // Verify that first decryption matches stored first encrypted data
+            if (firstDecryption != firstEncryptedData) {
+                throw SecurityException("First decryption verification failed")
+            }
+
+            // Second layer: decrypt with master key using its correct IV
             val finalDecryption = decryptWithKey(firstEncryptedData, firstIV, KEY_ALIAS_MASTER)
 
             return finalDecryption
