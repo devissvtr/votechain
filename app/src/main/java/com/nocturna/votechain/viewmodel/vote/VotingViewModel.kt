@@ -19,7 +19,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class VotingViewModel(private val repository: VotingRepository) : ViewModel() {
+class VotingViewModel(private val context: Context,
+                      private val repository: VotingRepository
+) : ViewModel() {
 
     private val _activeVotings = MutableStateFlow<List<VotingCategory>>(emptyList())
     val activeVotings: StateFlow<List<VotingCategory>> = _activeVotings.asStateFlow()
@@ -44,6 +46,46 @@ class VotingViewModel(private val repository: VotingRepository) : ViewModel() {
 
     init {
         checkVotingStatus()
+    }
+
+    /**
+     * Cast vote using enhanced signed transaction method
+     */
+    fun castVoteWithSignedTransaction(
+        electionPairId: String,
+        region: String,
+        otpToken: String? = null
+    ) {
+        viewModelScope.launch {
+            _voteState.value = VoteState.Loading
+            _isLoading.value = true
+
+            repository.castVoteWithSignedTransaction(electionPairId, region, otpToken)
+                .collect { result ->
+                    _isLoading.value = false
+                    result.fold(
+                        onSuccess = { response ->
+                            if (response.code == 0) {
+                                _voteState.value = VoteState.Success(response.data)
+                                _voteResult.value = response
+                                _hasVoted.value = true
+                                // Refresh data after successful vote
+                                fetchActiveVotings()
+                                fetchVotingResults()
+                            } else {
+                                _voteState.value = VoteState.Error(
+                                    response.error?.error_message ?: "Unknown error"
+                                )
+                                _error.value = response.error?.error_message
+                            }
+                        },
+                        onFailure = { error ->
+                            _voteState.value = VoteState.Error(error.message ?: "Unknown error")
+                            _error.value = error.message
+                        }
+                    )
+                }
+        }
     }
 
     fun fetchActiveVotings() {
@@ -86,6 +128,8 @@ class VotingViewModel(private val repository: VotingRepository) : ViewModel() {
 
     /**
      * Cast a vote for a specific election pair
+     * Cast a vote for a specific election pair
+     * Cast a vote for a specific election pair
      * @param electionPairId The ID of the selected candidate pair
      * @param region The voter's region
      */
@@ -93,7 +137,7 @@ class VotingViewModel(private val repository: VotingRepository) : ViewModel() {
         viewModelScope.launch {
             _voteState.value = VoteState.Loading
 
-            repository.castVoteWithOTPVerification(electionPairId, region)
+            repository.castVoteWithSignedTransaction(electionPairId, region)
                 .collect { result ->
                     result.fold(
                         onSuccess = { response ->
@@ -116,34 +160,34 @@ class VotingViewModel(private val repository: VotingRepository) : ViewModel() {
                 }
         }
     }
-
-    /**
-     * Legacy method for backward compatibility
-     * @param categoryId The voting category ID
-     * @param optionId The selected option/candidate ID
-     */
-    fun submitVote(categoryId: String, optionId: String) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            _error.value = null
-
-            repository.submitVote(categoryId, optionId).collect { result ->
-                _isLoading.value = false
-                result.fold(
-                    onSuccess = {
-                        _hasVoted.value = true
-                        // Refresh data after successful vote
-                        fetchActiveVotings()
-                        fetchVotingResults()
-                    },
-                    onFailure = { e ->
-                        _error.value = e.message ?: "Failed to submit vote"
-                    }
-                )
-            }
-        }
-    }
-
+//
+//    /**
+//     * Legacy method for backward compatibility
+//     * @param categoryId The voting category ID
+//     * @param optionId The selected option/candidate ID
+//     */
+//    fun submitVote(categoryId: String, optionId: String) {
+//        viewModelScope.launch {
+//            _isLoading.value = true
+//            _error.value = null
+//
+//            repository.submitVote(categoryId, optionId).collect { result ->
+//                _isLoading.value = false
+//                result.fold(
+//                    onSuccess = {
+//                        _hasVoted.value = true
+//                        // Refresh data after successful vote
+//                        fetchActiveVotings()
+//                        fetchVotingResults()
+//                    },
+//                    onFailure = { e ->
+//                        _error.value = e.message ?: "Failed to submit vote"
+//                    }
+//                )
+//            }
+//        }
+//    }
+//
     /**
      * Check current voting status
      */
@@ -151,39 +195,15 @@ class VotingViewModel(private val repository: VotingRepository) : ViewModel() {
         _hasVoted.value = repository.hasUserVoted()
     }
 
-    /**
-     * Clear error state
-     */
-    fun clearError() {
-        _error.value = null
-    }
-
-    /**
-     * Clear vote result
-     */
-    fun clearVoteResult() {
-        _voteResult.value = null
-    }
-
-    /**
-     * Reset voting status (for testing purposes)
-     */
-    fun resetVotingStatus() {
-        repository.resetVotingStatus()
-        _hasVoted.value = false
-    }
-
     // Factory for creating VotingViewModel with dependencies
     class Factory(private val context: Context) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(VotingViewModel::class.java)) {
-                val cryptoKeyManager = CryptoKeyManager(context)
-                val repository = VotingRepository(
+                return VotingViewModel(
                     context = context,
-                    cryptoKeyManager = cryptoKeyManager
-                )
-                return VotingViewModel(repository) as T
+                    repository = VotingRepository(context, CryptoKeyManager(context))
+                ) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }

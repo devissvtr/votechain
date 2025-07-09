@@ -38,3 +38,13 @@ data class VoteCastError(
     val error_code: Int,
     val error_message: String
 )
+
+/**
+ * Sealed class representing different states of vote submission
+ */
+sealed class VoteState {
+    object Idle : VoteState()
+    object Loading : VoteState()
+    data class Success(val data: VoteCastData?) : VoteState()
+    data class Error(val message: String) : VoteState()
+}

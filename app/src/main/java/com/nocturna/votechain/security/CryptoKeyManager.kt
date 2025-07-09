@@ -805,13 +805,13 @@ class CryptoKeyManager(private val context: Context) {
             }
 
             val firstIV = ivParts[0]
-            val secondEncryptedData = ivParts[1]
+            val firstEncryptedData = ivParts[1]
 
             // First layer: decrypt with encryption key
-            val firstDecryption = decryptWithKey(encryptedData, firstIV, KEY_ALIAS_ENCRYPTION)
+            val secondDecryption = decryptWithKey(encryptedData, firstIV, KEY_ALIAS_ENCRYPTION)
 
             // Second layer: decrypt with master key
-            val finalDecryption = decryptWithKey(secondEncryptedData, firstIV, KEY_ALIAS_MASTER)
+            val finalDecryption = decryptWithKey(firstEncryptedData, firstIV, KEY_ALIAS_MASTER)
 
             return finalDecryption
         } catch (e: Exception) {
@@ -1213,15 +1213,14 @@ class CryptoKeyManager(private val context: Context) {
 
                     // Step 7: Verify the stored keys
                     if (validateStoredKeys()) {
-                        Log.d(TAG, "✅ Keys successfully repaired and validated")
+                        Log.d(TAG, "✅ Keys successfully repaired and verified")
                         return true
                     } else {
-                        Log.e(TAG, "❌ Repaired keys failed final validation")
-                        clearStoredKeys()
+                        Log.e(TAG, "❌ Repaired keys failed verification")
                         return false
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "❌ Exception during key restoration: ${e.message}", e)
+                    Log.e(TAG, "❌ Failed to create or store KeyPairInfo: ${e.message}", e)
                     return false
                 }
             } else {

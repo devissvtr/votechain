@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
  */
 object NetworkClient {
 
-    const val BASE_URL = "https://6f4a-36-79-168-77.ngrok-free.app"
+    const val BASE_URL = "https://fc5edff56405.ngrok-free.app"
     private const val TAG = "NetworkClient"
     private const val PREFS_NAME = "VoteChainPrefs"
     private const val KEY_USER_TOKEN = "user_token"
@@ -125,13 +125,6 @@ object NetworkClient {
      */
     val apiService: ApiService by lazy {
         retrofit.create(ApiService::class.java)
-    }
-
-    /**
-     * Create API service instance for voter-related operations
-     */
-    val voterApiService: VoterApiService by lazy {
-        retrofit.create(VoterApiService::class.java)
     }
 
     val voteApiService: VoteApiService = retrofit.create(VoteApiService::class.java)

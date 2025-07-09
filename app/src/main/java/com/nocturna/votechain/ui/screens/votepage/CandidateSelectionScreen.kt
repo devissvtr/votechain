@@ -2,6 +2,7 @@ package com.nocturna.votechain.ui.screens.votepage
 
 import android.content.Context
 import android.util.Log
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -46,8 +47,10 @@ import com.nocturna.votechain.utils.CandidatePhotoHelper
 import com.nocturna.votechain.utils.CoilAuthHelper
 import com.nocturna.votechain.utils.LanguageManager
 import com.nocturna.votechain.utils.VoteErrorHandler
+import androidx.compose.runtime.collectAsState
 import com.nocturna.votechain.viewmodel.candidate.ElectionViewModel
 import com.nocturna.votechain.viewmodel.vote.VotingViewModel
+import com.nocturna.votechain.viewmodel.vote.VotingViewModel.VoteState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,25 +109,28 @@ fun CandidateSelectionScreen(
         electionViewModel.fetchElectionPairs()
     }
 
-    // Handle successful vote submission
+    // FIXED: Handle legacy hasVoted state for backward compatibility
     LaunchedEffect(hasVoted) {
-        if (hasVoted && isSubmittingVote) {
-            isSubmittingVote = false
-            Log.d("CandidateSelectionScreen", "Vote submitted successfully - navigating to vote success")
-            // Navigate to vote success screen
+        if (hasVoted && !isSubmittingVote) {
+            Log.d("CandidateSelectionScreen", "Legacy vote completion detected - navigating to vote success")
             navController.navigate("vote_success") {
                 popUpTo("candidate_selection/$categoryId") { inclusive = true }
             }
         }
     }
 
-    // Handle vote submission errors
-    LaunchedEffect(votingError) {
-        if (votingError != null && isSubmittingVote) {
-            isSubmittingVote = false
-            Log.e("CandidateSelectionScreen", "Vote submission error: $votingError")
-            // Handle error (show snackbar, etc.)
-        }
+    // FIXED: Add user region retrieval
+    fun getUserRegion(): String {
+        val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
+        return sharedPreferences.getString("user_region", null)
+            ?: sharedPreferences.getString("region", null)
+            ?: "default"
+    }
+
+    // FIXED: Add OTP token retrieval
+    fun getOTPToken(): String {
+        val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
+        return sharedPreferences.getString("otp_token", null) ?: ""
     }
 
     Scaffold(
@@ -270,16 +276,22 @@ fun CandidateSelectionScreen(
         VoteConfirmationDialog(
             onConfirm = {
                 showConfirmationDialog = false
-                isSubmittingVote = true
                 selectedCandidateId?.let { electionPairId ->
-                    // Submit vote using the existing VotingViewModel method
+                    // FIXED: Get proper region and OTP token
+                    val userRegion = getUserRegion()
+                    val otpToken = getOTPToken()
+
+                    Log.d("CandidateSelectionScreen", "Submitting vote:")
+                    Log.d("CandidateSelectionScreen", "  - Election Pair ID: $electionPairId")
+                    Log.d("CandidateSelectionScreen", "  - Region: $userRegion")
+                    Log.d("CandidateSelectionScreen", "  - OTP Token: ${if (otpToken.isNotEmpty()) "Present" else "Missing"}")
+
+                    // FIXED: Use proper parameters for vote submission
                     votingViewModel.castVote(
                         electionPairId = electionPairId,
-                        region = "default", // atau get dari user preferences
-                        otpToken = "" // jika diperlukan OTP
+                        region = userRegion,
+                        otpToken = otpToken
                     )
-                    // Alternative: gunakan submitVote jika lebih sesuai
-                    // votingViewModel.submitVote(categoryId, electionPairId)
                 }
             },
             onDismiss = {

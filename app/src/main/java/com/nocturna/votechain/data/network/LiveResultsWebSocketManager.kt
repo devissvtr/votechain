@@ -31,7 +31,7 @@ class LiveResultsWebSocketManager {
     private val TAG = "LiveResultsWebSocketManager"
 
     companion object {
-        private const val WEBSOCKET_URL = "ws://6f4a-36-79-168-77.ngrok-free.app/v1/live/ws"
+        private const val WEBSOCKET_URL = "ws://fc5edff56405.ngrok-free.app/v1/live/ws"
         private const val RECONNECT_DELAY = 5000L // 5 seconds
         private const val MAX_RECONNECT_ATTEMPTS = 5
         private const val CONNECTION_TIMEOUT = 10L

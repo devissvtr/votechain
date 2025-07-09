@@ -7,6 +7,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.web3j.protocol.Web3j
 import org.web3j.protocol.http.HttpService
+import java.security.MessageDigest
+import java.security.SecureRandom
 
 /**
  * Updated SignedTransactionGenerator that creates proper Ethereum transactions
@@ -16,166 +18,179 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
 
     companion object {
         private const val TAG = "SignedTransactionGenerator"
-    }
-
-    private val web3j: Web3j by lazy {
-        val network = BlockchainConfig.getCurrentNetwork()
-        Web3j.build(HttpService(network.rpcUrl))
-    }
-
-    private val ethereumTransactionGenerator: EthereumTransactionGenerator by lazy {
-        EthereumTransactionGenerator(cryptoKeyManager, web3j)
+        private const val TRANSACTION_VERSION = "1.0"
+        private const val SIGNATURE_ALGORITHM = "ECDSA_SHA256"
     }
 
     /**
-     * Generate signed transaction for voting
-     * Now returns a proper Ethereum transaction in hex format
-     *
+     * Generate enhanced signed transaction for voting
      * @param electionPairId The ID of the selected candidate pair
      * @param voterId The voter's unique identifier
      * @param region The voter's region
-     * @return Signed Ethereum transaction string (0x...) or null if failed
+     * @param timestamp Unix timestamp of the transaction
+     * @return Signed transaction string or null if failed
      */
-    suspend fun generateVoteSignedTransaction(
+    suspend fun generateVoteTransaction(
         electionPairId: String,
         voterId: String,
-        region: String
+        region: String,
+        timestamp: Long
     ): String? = withContext(Dispatchers.IO) {
         try {
-            Log.d(TAG, "🔐 Starting signed transaction generation")
+            Log.d(TAG, "🔐 Generating enhanced signed transaction")
             Log.d(TAG, "  - Election Pair ID: $electionPairId")
             Log.d(TAG, "  - Voter ID: $voterId")
             Log.d(TAG, "  - Region: $region")
+            Log.d(TAG, "  - Timestamp: $timestamp")
 
-            // Validate inputs
-            if (!validateInputs(electionPairId, voterId, region)) {
-                Log.e(TAG, "❌ Input validation failed")
+            // Step 1: Validate inputs
+            if (!validateTransactionInputs(electionPairId, voterId, region)) {
+                Log.e(TAG, "❌ Transaction input validation failed")
                 return@withContext null
             }
 
-            // Validate crypto prerequisites
-            if (!validateCryptoPrerequisites()) {
-                Log.e(TAG, "❌ Crypto prerequisites validation failed")
+            // Step 2: Get cryptographic keys from user profile
+            val privateKey = cryptoKeyManager.getPrivateKey()
+            val publicKey = cryptoKeyManager.getPublicKey()
+            val voterAddress = cryptoKeyManager.getVoterAddress()
+
+            if (privateKey.isNullOrEmpty() || publicKey.isNullOrEmpty()) {
+                Log.e(TAG, "❌ Required keys not available from user profile")
                 return@withContext null
             }
 
-            // Generate Ethereum transaction
-            val signedTransaction = ethereumTransactionGenerator.generateVoteTransaction(
-                electionPairId = electionPairId,
-                voterId = voterId,
-                region = region
+            Log.d(TAG, "✅ Keys retrieved from user profile")
+            Log.d(TAG, "  - Private key length: ${privateKey.length}")
+            Log.d(TAG, "  - Public key length: ${publicKey.length}")
+            Log.d(TAG, "  - Voter address: $voterAddress")
+
+            // Step 3: Create transaction data structure
+            val nonce = generateSecureNonce()
+            val transactionData = createTransactionData(
+                electionPairId, voterId, region, timestamp, nonce, voterAddress ?: ""
             )
 
-            if (signedTransaction == null) {
-                Log.e(TAG, "❌ Failed to generate Ethereum transaction")
+            Log.d(TAG, "✅ Transaction data created")
+            Log.d(TAG, "  - Nonce: $nonce")
+            Log.d(TAG, "  - Data length: ${transactionData.length}")
+
+            // Step 4: Generate transaction hash
+            val transactionHash = generateTransactionHash(transactionData)
+            Log.d(TAG, "✅ Transaction hash generated: ${transactionHash.take(16)}...")
+
+            // Step 5: Sign the transaction using private key
+            val signature = signTransactionData(transactionHash, privateKey)
+            if (signature.isNullOrEmpty()) {
+                Log.e(TAG, "❌ Failed to sign transaction data")
                 return@withContext null
             }
 
-            Log.d(TAG, "✅ Ethereum transaction generated successfully")
-            Log.d(TAG, "  - Transaction hash: ${org.web3j.crypto.Hash.sha3(signedTransaction)}")
-            Log.d(TAG, "  - Transaction length: ${signedTransaction.length} characters")
+            Log.d(TAG, "✅ Transaction signed successfully")
+            Log.d(TAG, "  - Signature length: ${signature.length}")
+
+            // Step 6: Create final signed transaction
+            val signedTransaction = createFinalSignedTransaction(
+                transactionData, transactionHash, signature, publicKey
+            )
+
+            Log.d(TAG, "✅ Enhanced signed transaction created")
+            Log.d(TAG, "  - Final transaction length: ${signedTransaction.length}")
 
             return@withContext signedTransaction
 
-        } catch (e: SecurityException) {
-            Log.e(TAG, "❌ Security error during transaction generation: ${e.message}", e)
-            null
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Unexpected error during transaction generation: ${e.message}", e)
-            null
+            Log.e(TAG, "❌ Exception during transaction generation", e)
+            return@withContext null
         }
     }
 
     /**
-     * Validate signed transaction format
-     * Now validates Ethereum transaction format
-     *
-     * @param signedTransaction The signed transaction to validate
-     * @return true if valid Ethereum transaction, false otherwise
+     * Validate signed transaction format and signature
      */
-    fun validateSignedTransaction(signedTransaction: String?): Boolean {
-        return try {
-            if (signedTransaction.isNullOrEmpty()) {
-                Log.e(TAG, "❌ Signed transaction is null or empty")
-                return false
+    fun validateSignedTransaction(signedTransaction: String): TransactionValidationResult {
+        try {
+            if (signedTransaction.isBlank()) {
+                return TransactionValidationResult(false, "Transaction is empty")
             }
 
-            // Must start with 0x
-            if (!signedTransaction.startsWith("0x")) {
-                Log.e(TAG, "❌ Transaction doesn't start with 0x")
-                return false
+            // Parse transaction components
+            val parts = signedTransaction.split("|")
+            if (parts.size < 5) {
+                return TransactionValidationResult(false, "Invalid transaction format - insufficient parts")
             }
 
-            // Check minimum length (at least 100 characters for a transaction)
-            if (signedTransaction.length < 100) {
-                Log.e(TAG, "❌ Transaction too short: ${signedTransaction.length} chars")
-                return false
+            val version = parts[0]
+            val data = parts[1]
+            val hash = parts[2]
+            val signature = parts[3]
+            val publicKey = parts[4]
+
+            // Validate version
+            if (version != "v$TRANSACTION_VERSION") {
+                return TransactionValidationResult(false, "Invalid transaction version")
             }
 
-            // Validate hex format
-            val hex = signedTransaction.substring(2)
-            if (!hex.matches(Regex("[0-9a-fA-F]+"))) {
-                Log.e(TAG, "❌ Transaction contains non-hex characters")
-                return false
+            // Validate data format
+            if (data.isBlank() || !data.contains(":")) {
+                return TransactionValidationResult(false, "Invalid transaction data format")
             }
 
-            // Additional validation: check transaction type byte
-            val txBytes = org.web3j.utils.Numeric.hexStringToByteArray(signedTransaction)
-            if (txBytes.isEmpty()) {
-                Log.e(TAG, "❌ Failed to decode transaction bytes")
-                return false
+            // Validate hash
+            if (hash.length != 64 || !hash.matches(Regex("^[0-9a-fA-F]{64}$"))) {
+                return TransactionValidationResult(false, "Invalid transaction hash format")
             }
 
-            val txType = txBytes[0].toInt() and 0xFF
-            val isValidType = when (txType) {
-                0x00, 0x01, 0x02 -> true // Valid EIP transaction types
-                in 0xc0..0xfe -> true // Legacy transaction
-                else -> false
+            // Validate signature
+            if (signature.length != 64 || !signature.matches(Regex("^[0-9a-fA-F]{64}$"))) {
+                return TransactionValidationResult(false, "Invalid signature format")
             }
 
-            if (!isValidType) {
-                Log.e(TAG, "❌ Invalid transaction type: $txType")
-                return false
+            // Validate public key format
+            if (!publicKey.startsWith("0x") || publicKey.length < 130) {
+                return TransactionValidationResult(false, "Invalid public key format")
             }
 
-            Log.d(TAG, "✅ Signed transaction validation passed")
-            return true
+            // Verify hash integrity
+            val computedHash = generateTransactionHash(data)
+            if (computedHash != hash) {
+                return TransactionValidationResult(false, "Transaction hash verification failed")
+            }
+
+            Log.d(TAG, "✅ Signed transaction validation successful")
+            return TransactionValidationResult(true, "Transaction validated successfully")
 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error validating signed transaction: ${e.message}", e)
-            false
+            Log.e(TAG, "❌ Transaction validation exception", e)
+            return TransactionValidationResult(false, "Validation failed: ${e.message}")
         }
     }
 
     /**
-     * Get transaction info for debugging
+     * Validate transaction inputs
      */
-    fun getTransactionInfo(signedTransaction: String): Map<String, String> {
-        return ethereumTransactionGenerator.getTransactionInfo(signedTransaction)
-    }
-
-    /**
-     * Validate input parameters
-     */
-    private fun validateInputs(electionPairId: String, voterId: String, region: String): Boolean {
+    private fun validateTransactionInputs(
+        electionPairId: String,
+        voterId: String,
+        region: String
+    ): Boolean {
         return when {
-            electionPairId.isEmpty() -> {
-                Log.e(TAG, "❌ Election pair ID is empty")
+            electionPairId.isBlank() -> {
+                Log.e(TAG, "❌ Election pair ID is blank")
                 false
             }
-            voterId.isEmpty() -> {
-                Log.e(TAG, "❌ Voter ID is empty")
+            voterId.isBlank() -> {
+                Log.e(TAG, "❌ Voter ID is blank")
                 false
             }
-            region.isEmpty() -> {
-                Log.e(TAG, "❌ Region is empty")
+            region.isBlank() -> {
+                Log.e(TAG, "❌ Region is blank")
                 false
             }
             electionPairId.length > 100 -> {
                 Log.e(TAG, "❌ Election pair ID too long")
                 false
             }
-            voterId.length > 100 -> {
+            voterId.length > 50 -> {
                 Log.e(TAG, "❌ Voter ID too long")
                 false
             }
@@ -184,42 +199,82 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
                 false
             }
             else -> {
-                Log.d(TAG, "✅ Input validation passed")
+                Log.d(TAG, "✅ Transaction inputs validated")
                 true
             }
         }
     }
 
     /**
-     * Validate cryptographic prerequisites
+     * Create structured transaction data
      */
-    private fun validateCryptoPrerequisites(): Boolean {
+    private fun createTransactionData(
+        electionPairId: String,
+        voterId: String,
+        region: String,
+        timestamp: Long,
+        nonce: String,
+        voterAddress: String
+    ): String {
+        return "election_pair_id:$electionPairId|" +
+                "voter_id:$voterId|" +
+                "region:$region|" +
+                "timestamp:$timestamp|" +
+                "nonce:$nonce|" +
+                "voter_address:$voterAddress|" +
+                "algorithm:$SIGNATURE_ALGORITHM"
+    }
+
+    /**
+     * Generate secure nonce for transaction uniqueness
+     */
+    private fun generateSecureNonce(): String {
+        val random = SecureRandom()
+        val bytes = ByteArray(16)
+        random.nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Generate SHA-256 hash of transaction data
+     */
+    private fun generateTransactionHash(data: String): String {
+        return MessageDigest.getInstance("SHA-256")
+            .digest(data.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Sign transaction data using private key
+     */
+    private fun signTransactionData(transactionHash: String, privateKey: String): String? {
         return try {
-            // Check if crypto key manager has required keys
-            if (!cryptoKeyManager.hasStoredKeyPair()) {
-                Log.e(TAG, "❌ No key pair stored")
-                return false
-            }
-
-            // Test that we can retrieve the private key
-            val privateKey = cryptoKeyManager.getPrivateKey()
-            if (privateKey.isNullOrEmpty()) {
-                Log.e(TAG, "❌ Cannot retrieve private key")
-                return false
-            }
-
-            // Validate private key format
-            if (!cryptoKeyManager.validatePrivateKeyFormat(privateKey)) {
-                Log.e(TAG, "❌ Private key has invalid format")
-                return false
-            }
-
-            Log.d(TAG, "✅ Crypto prerequisites validation passed")
-            return true
-
+            // Use the crypto key manager's signing method
+            val signatureData = "$transactionHash:$privateKey:${System.currentTimeMillis()}"
+            cryptoKeyManager.signData(signatureData)
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Crypto validation exception: ${e.message}", e)
-            return false
+            Log.e(TAG, "❌ Signing failed", e)
+            null
         }
     }
+
+    /**
+     * Create final signed transaction string
+     */
+    private fun createFinalSignedTransaction(
+        transactionData: String,
+        transactionHash: String,
+        signature: String,
+        publicKey: String
+    ): String {
+        return "v$TRANSACTION_VERSION|$transactionData|$transactionHash|$signature|$publicKey"
+    }
+
+    /**
+     * Data class for transaction validation results
+     */
+    data class TransactionValidationResult(
+        val isValid: Boolean,
+        val error: String?
+    )
 }

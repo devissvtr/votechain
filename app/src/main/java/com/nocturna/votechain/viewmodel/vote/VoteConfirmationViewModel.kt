@@ -24,50 +24,65 @@ class VoteConfirmationViewModel(
     private val TAG = "VoteConfirmationViewModel"
     private val votingRepository = VotingRepository(context, CryptoKeyManager(context))
 
-    private val _uiState = MutableStateFlow(VoteConfirmationUiState())
-    val uiState: StateFlow<VoteConfirmationUiState> = _uiState.asStateFlow()
+    private val _uiState = MutableStateFlow(EnhancedVoteConfirmationUiState())
+    val uiState: StateFlow<EnhancedVoteConfirmationUiState> = _uiState.asStateFlow()
 
     /**
-     * Cast the vote using the verified OTP token
-     * This method now properly accepts parameters from the UI
-     *
+     * Cast vote with enhanced signed transaction validation
      * @param electionPairId The ID of the election pair to vote for
      * @param region The voter's region
-     * @param otpToken The OTP token for verification
+     * @param otpToken The OTP token for verification (optional)
      */
-    fun castVote(electionPairId: String, region: String, otpToken: String) {
+    fun castVoteWithSignedTransaction(
+        electionPairId: String,
+        region: String,
+        otpToken: String? = null
+    ) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            _uiState.value = _uiState.value.copy(
+                isLoading = true,
+                error = null,
+                step = VoteStep.VALIDATING_PREREQUISITES
+            )
 
-            Log.d(TAG, "Starting vote casting process...")
-            Log.d(TAG, "Election Pair ID: $electionPairId")
-            Log.d(TAG, "Region: $region")
-            Log.d(TAG, "OTP Token present: ${otpToken.isNotEmpty()}")
+            Log.d(TAG, "🗳️ Starting enhanced vote casting process...")
+            Log.d(TAG, "  - Election Pair ID: $electionPairId")
+            Log.d(TAG, "  - Region: $region")
+            Log.d(TAG, "  - OTP Token provided: ${!otpToken.isNullOrEmpty()}")
 
-            // Use the castVoteWithOTPVerification method which already handles:
-            // 1. Validation of prerequisites
-            // 2. Generation of signed transaction using private/public keys
-            // 3. Sending to /v1/vote/cast endpoint
-            votingRepository.castVoteWithOTPVerification(electionPairId, region)
+            // Update UI to show transaction generation step
+            _uiState.value = _uiState.value.copy(step = VoteStep.GENERATING_TRANSACTION)
+
+            votingRepository.castVoteWithSignedTransaction(electionPairId, region, otpToken)
                 .collect { result ->
                     result.fold(
                         onSuccess = { voteResponse ->
                             Log.d(TAG, "✅ Vote cast successfully!")
-                            Log.d(TAG, "Response: ${voteResponse.message}")
-                            Log.d(TAG, "Transaction Hash: ${voteResponse.data?.tx_hash}")
+                            Log.d(TAG, "  - Response code: ${voteResponse.code}")
+                            Log.d(TAG, "  - Message: ${voteResponse.message}")
+                            Log.d(TAG, "  - Vote ID: ${voteResponse.data?.id}")
+                            Log.d(TAG, "  - Status: ${voteResponse.data?.status}")
+                            Log.d(TAG, "  - Transaction Hash: ${voteResponse.data?.tx_hash}")
+                            Log.d(TAG, "  - Voted At: ${voteResponse.data?.voted_at}")
 
                             _uiState.value = _uiState.value.copy(
                                 isLoading = false,
                                 isVoteSuccess = true,
                                 error = null,
-                                transactionHash = voteResponse.data?.tx_hash
+                                step = VoteStep.COMPLETED,
+                                transactionHash = voteResponse.data?.tx_hash,
+                                voteId = voteResponse.data?.id,
+                                voteStatus = voteResponse.data?.status,
+                                votedAt = voteResponse.data?.voted_at,
+                                responseMessage = voteResponse.message
                             )
                         },
-                        onFailure = { e ->
-                            Log.e(TAG, "❌ Vote casting failed: ${e.message}")
+                        onFailure = { exception ->
+                            Log.e(TAG, "❌ Vote casting failed: ${exception.message}")
                             _uiState.value = _uiState.value.copy(
                                 isLoading = false,
-                                error = e.message ?: "Failed to cast vote"
+                                error = exception.message ?: "Failed to cast vote",
+                                step = VoteStep.ERROR
                             )
                         }
                     )
@@ -76,13 +91,19 @@ class VoteConfirmationViewModel(
     }
 
     /**
-     * Alternative method without parameters for backward compatibility
-     * Uses the electionPairId from constructor
+     * Retry vote casting
      */
-    fun castVote() {
+    fun retryVote() {
         val region = getStoredRegion() ?: "default"
-        val otpToken = getStoredOtpToken() ?: ""
-        castVote(electionPairId, region, otpToken)
+        val otpToken = getStoredOtpToken()
+        castVoteWithSignedTransaction(electionPairId, region, otpToken)
+    }
+
+    /**
+     * Clear error state
+     */
+    fun clearError() {
+        _uiState.value = _uiState.value.copy(error = null, step = VoteStep.READY)
     }
 
     private fun getStoredRegion(): String? {
@@ -96,7 +117,7 @@ class VoteConfirmationViewModel(
     }
 
     /**
-     * Factory for creating VoteConfirmationViewModel
+     * Factory for creating EnhancedVoteConfirmationViewModel
      */
     class Factory(
         private val context: Context,
@@ -114,11 +135,28 @@ class VoteConfirmationViewModel(
 }
 
 /**
- * UI State for Vote Confirmation Screen
+ * Enhanced UI State for Vote Confirmation Screen
  */
-data class VoteConfirmationUiState(
+data class EnhancedVoteConfirmationUiState(
     val isLoading: Boolean = false,
     val isVoteSuccess: Boolean = false,
     val error: String? = null,
-    val transactionHash: String? = null
+    val step: VoteStep = VoteStep.READY,
+    val transactionHash: String? = null,
+    val voteId: String? = null,
+    val voteStatus: String? = null,
+    val votedAt: String? = null,
+    val responseMessage: String? = null
 )
+
+/**
+ * Enum for tracking vote process steps
+ */
+enum class VoteStep {
+    READY,
+    VALIDATING_PREREQUISITES,
+    GENERATING_TRANSACTION,
+    SUBMITTING_VOTE,
+    COMPLETED,
+    ERROR
+}

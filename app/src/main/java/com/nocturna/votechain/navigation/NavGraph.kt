@@ -336,17 +336,6 @@ fun VotechainNavGraph(
             )
         }
 
-        // Vote Success screen - Fixed implementation
-        composable("vote_success") {
-            VoteSuccessScreen(
-                onBackToHome = {
-                    navController.navigate("home") {
-                        popUpTo("vote_success") { inclusive = true }
-                    }
-                }
-            )
-        }
-
         composable(
             "candidate_president/{voteId}",
             arguments = listOf(navArgument("voteId") { type = NavType.StringType })
@@ -422,14 +411,31 @@ fun VotechainNavGraph(
 
         // Vote Confirmation Screen
         composable(
-            route = "vote_confirmation/{electionPairId}",
-            arguments = listOf(navArgument("electionPairId") { type = NavType.StringType })
+            route = "vote_confirmation/{electionPairId}/{categoryId}",
+            arguments = listOf(
+                navArgument("electionPairId") { type = NavType.StringType },
+                navArgument("categoryId") { type = NavType.StringType }
+            )
         ) { backStackEntry ->
             val electionPairId = backStackEntry.arguments?.getString("electionPairId") ?: ""
+            val categoryId = backStackEntry.arguments?.getString("categoryId") ?: ""
+
             VoteConfirmationScreen(
                 navController = navController,
                 electionPairId = electionPairId,
-                viewModel = votingViewModel // Pass your existing VotingViewModel
+                categoryId = categoryId
+            )
+        }
+
+        composable(
+            route = "vote_success/{voteId}",
+            arguments = listOf(navArgument("voteId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val voteId = backStackEntry.arguments?.getString("voteId") ?: ""
+
+            VoteSuccessScreen(
+                navController = navController,
+                voteId = voteId
             )
         }
 
