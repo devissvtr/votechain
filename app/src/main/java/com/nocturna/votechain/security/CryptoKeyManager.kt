@@ -198,11 +198,11 @@ class CryptoKeyManager(private val context: Context) {
     /**
      * Validate private key format
      */
-    private fun isValidPrivateKeyFormat(privateKey: String): Boolean {
-        return privateKey.length == PRIVATE_KEY_TOTAL_LENGTH &&
-                privateKey.startsWith("0x") &&
-                privateKey.substring(2).matches(Regex("^[0-9a-fA-F]{$PRIVATE_KEY_HEX_LENGTH}$"))
-    }
+//    private fun isValidPrivateKeyFormat(privateKey: String): Boolean {
+//        return privateKey.length == PRIVATE_KEY_TOTAL_LENGTH &&
+//                privateKey.startsWith("0x") &&
+//                privateKey.substring(2).matches(Regex("^[0-9a-fA-F]{$PRIVATE_KEY_HEX_LENGTH}$"))
+//    }
 
     /**
      * Validate private key format with detailed logging
@@ -371,16 +371,15 @@ class CryptoKeyManager(private val context: Context) {
      */
     fun storeKeyPair(keyPairInfo: KeyPairInfo) {
         try {
-            logKeystoreStorageProcess(keyPairInfo)
-            Log.d(TAG, "Storing key pair with enhanced security...")
+            Log.d(TAG, "💾 Storing key pair with single encryption...")
 
-            // Validate key pair before storing
-            validateKeyPair(keyPairInfo)
+            // Ensure Android Keystore keys are available
+            generateMasterKeyIfNeeded()
 
-            // Double-encrypt private key for extra security
-            val encryptedPrivateKeyData = doubleEncryptPrivateKey(keyPairInfo.privateKey)
+            // Encrypt private key using simple single encryption
+            val encryptedPrivateKeyData = encryptPrivateKey(keyPairInfo.privateKey)
 
-            // Store with transaction for atomicity
+            // Store all data in encrypted shared preferences
             with(encryptedSharedPreferences.edit()) {
                 putString(PUBLIC_KEY_KEY, keyPairInfo.publicKey)
                 putString(VOTER_ADDRESS_KEY, keyPairInfo.voterAddress)
@@ -388,34 +387,64 @@ class CryptoKeyManager(private val context: Context) {
                 putString(IV_KEY, encryptedPrivateKeyData.iv)
                 putLong(KEY_CREATION_TIME, keyPairInfo.creationTime)
                 putString(KEY_GENERATION_METHOD, keyPairInfo.generationMethod)
-                commit() // Use commit for synchronous write
+                putInt("encryption_version", 2) // Mark as new single encryption version
+                commit() // Use commit for immediate persistence
             }
 
-            // Create and store metadata
-            val metadata = KeyMetadata(
-                creationTime = keyPairInfo.creationTime,
-                accessCount = 0,
-                lastAccessTime = System.currentTimeMillis(),
-                keyVersion = keyPairInfo.keyVersion,
-                generationMethod = keyPairInfo.generationMethod
-            )
-
-            val metadataJson = "${metadata.creationTime},${metadata.accessCount},${metadata.lastAccessTime},${metadata.keyVersion},${metadata.generationMethod}"
-            encryptedSharedPreferences.edit()
-                .putString(KEY_METADATA, metadataJson)
-                .apply()
-
-            Log.d(TAG, "✅ Key pair stored successfully with double encryption")
-            logStorageVerification()
-
-            // Clear any sensitive data from memory
-            System.gc()
+            Log.d(TAG, "✅ Key pair stored successfully with single encryption")
 
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to store key pair: ${e.message}", e)
             throw SecurityException("Failed to store key pair securely", e)
         }
     }
+//    fun storeKeyPair(keyPairInfo: KeyPairInfo) {
+//        try {
+//            logKeystoreStorageProcess(keyPairInfo)
+//            Log.d(TAG, "Storing key pair with enhanced security...")
+//
+//            // Validate key pair before storing
+//            validateKeyPair(keyPairInfo)
+//
+//            // Double-encrypt private key for extra security
+//            val encryptedPrivateKeyData = doubleEncryptPrivateKey(keyPairInfo.privateKey)
+//
+//            // Store with transaction for atomicity
+//            with(encryptedSharedPreferences.edit()) {
+//                putString(PUBLIC_KEY_KEY, keyPairInfo.publicKey)
+//                putString(VOTER_ADDRESS_KEY, keyPairInfo.voterAddress)
+//                putString(ENCRYPTED_PRIVATE_KEY_KEY, encryptedPrivateKeyData.encryptedData)
+//                putString(IV_KEY, encryptedPrivateKeyData.iv)
+//                putLong(KEY_CREATION_TIME, keyPairInfo.creationTime)
+//                putString(KEY_GENERATION_METHOD, keyPairInfo.generationMethod)
+//                commit() // Use commit for synchronous write
+//            }
+//
+//            // Create and store metadata
+//            val metadata = KeyMetadata(
+//                creationTime = keyPairInfo.creationTime,
+//                accessCount = 0,
+//                lastAccessTime = System.currentTimeMillis(),
+//                keyVersion = keyPairInfo.keyVersion,
+//                generationMethod = keyPairInfo.generationMethod
+//            )
+//
+//            val metadataJson = "${metadata.creationTime},${metadata.accessCount},${metadata.lastAccessTime},${metadata.keyVersion},${metadata.generationMethod}"
+//            encryptedSharedPreferences.edit()
+//                .putString(KEY_METADATA, metadataJson)
+//                .apply()
+//
+//            Log.d(TAG, "✅ Key pair stored successfully with double encryption")
+//            logStorageVerification()
+//
+//            // Clear any sensitive data from memory
+//            System.gc()
+//
+//        } catch (e: Exception) {
+//            Log.e(TAG, "❌ Failed to store key pair: ${e.message}", e)
+//            throw SecurityException("Failed to store key pair securely", e)
+//        }
+//    }
 
     /**
      * Import wallet from private key with enhanced validation
@@ -549,25 +578,313 @@ class CryptoKeyManager(private val context: Context) {
      */
     fun getPrivateKey(): String? {
         return try {
+            Log.d(TAG, "🔍 Retrieving private key...")
+
             val encryptedData = encryptedSharedPreferences.getString(ENCRYPTED_PRIVATE_KEY_KEY, null)
             val iv = encryptedSharedPreferences.getString(IV_KEY, null)
 
-            if (encryptedData != null && iv != null) {
-                val decryptedKey = doubleDecryptPrivateKey(encryptedData, iv)
+            if (encryptedData == null || iv == null) {
+                Log.w(TAG, "❌ No encrypted private key or IV found")
+                return null
+            }
 
-                // Ensure the decrypted key is in the correct format
-                if (isValidPrivateKeyFormat(decryptedKey)) {
-                    decryptedKey
-                } else {
-                    Log.w(TAG, "Stored private key is not in correct format")
-                    null
+            // Check if this is legacy double encryption format
+            val encryptionVersion = encryptedSharedPreferences.getInt("encryption_version", 1)
+
+            val decryptedKey = when {
+                encryptionVersion == 2 -> {
+                    // New single encryption format
+                    Log.d(TAG, "📱 Using single encryption decryption")
+                    decryptPrivateKey(encryptedData, iv)
                 }
+                iv.contains("::") -> {
+                    // Legacy double encryption format - migrate to single encryption
+                    Log.w(TAG, "🔄 Detected legacy double encryption, migrating...")
+                    migrateLegacyToSingleEncryption(encryptedData, iv)
+                }
+                else -> {
+                    // Assume single encryption (old format without version)
+                    Log.d(TAG, "📱 Using single encryption decryption (legacy format)")
+                    decryptPrivateKey(encryptedData, iv)
+                }
+            }
+
+            // Validate private key format
+            if (decryptedKey != null && isValidPrivateKeyFormat(decryptedKey)) {
+                Log.d(TAG, "✅ Private key retrieved and validated successfully")
+                return decryptedKey
             } else {
-                null
+                Log.w(TAG, "❌ Retrieved private key failed validation")
+                return null
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to retrieve private key: ${e.message}", e)
+            null
+        }
+    }
+//    fun getPrivateKey(): String? {
+//        return try {
+//            val encryptedData = encryptedSharedPreferences.getString(ENCRYPTED_PRIVATE_KEY_KEY, null)
+//            val iv = encryptedSharedPreferences.getString(IV_KEY, null)
+//
+//            if (encryptedData != null && iv != null) {
+//                val decryptedKey = doubleDecryptPrivateKey(encryptedData, iv)
+//
+//                // Ensure the decrypted key is in the correct format
+//                if (isValidPrivateKeyFormat(decryptedKey)) {
+//                    decryptedKey
+//                } else {
+//                    Log.w(TAG, "Stored private key is not in correct format")
+//                    null
+//                }
+//            } else {
+//                null
+//            }
+//        } catch (e: Exception) {
+//            Log.e(TAG, "Failed to retrieve private key", e)
+//            null
+//        }
+//    }
+
+    /**
+     * Migrate legacy double encryption to simple single encryption
+     */
+    private fun migrateLegacyToSingleEncryption(encryptedData: String, legacyIV: String): String? {
+        return try {
+            Log.d(TAG, "🔄 Starting migration from double to single encryption...")
+
+            // Try to decrypt using legacy double encryption method
+            val decryptedKey = attemptLegacyDecryption(encryptedData, legacyIV)
+
+            if (decryptedKey != null && isValidPrivateKeyFormat(decryptedKey)) {
+                Log.d(TAG, "✅ Legacy decryption successful, re-storing with single encryption...")
+
+                // Re-encrypt using single encryption
+                val newEncryptedData = encryptPrivateKey(decryptedKey)
+
+                // Update storage with new format
+                with(encryptedSharedPreferences.edit()) {
+                    putString(ENCRYPTED_PRIVATE_KEY_KEY, newEncryptedData.encryptedData)
+                    putString(IV_KEY, newEncryptedData.iv)
+                    putInt("encryption_version", 2)
+                    commit()
+                }
+
+                Log.d(TAG, "✅ Migration to single encryption completed")
+                return decryptedKey
+            } else {
+                Log.e(TAG, "❌ Legacy decryption failed during migration")
+                return null
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Migration failed: ${e.message}", e)
+            null
+        }
+    }
+
+    /**
+     * Attempt legacy double decryption with various fallback methods
+     */
+    private fun attemptLegacyDecryption(encryptedData: String, iv: String): String? {
+        val ivParts = iv.split("::")
+
+        // Try different legacy decryption approaches
+        val approaches = listOf(
+            // Approach 1: Original double decryption logic
+            {
+                if (ivParts.size >= 2) {
+                    val firstIV = ivParts[0]
+                    val secondEncryptedData = if (ivParts.size > 2) ivParts[2] else ivParts[1]
+
+                    val firstDecryption = decryptWithKey(encryptedData, firstIV, KEY_ALIAS_ENCRYPTION)
+                    decryptWithKey(secondEncryptedData, firstIV, KEY_ALIAS_MASTER)
+                } else null
+            },
+
+            // Approach 2: Reversed key order
+            {
+                if (ivParts.size >= 2) {
+                    val firstIV = ivParts[0]
+                    val secondEncryptedData = if (ivParts.size > 2) ivParts[2] else ivParts[1]
+
+                    val firstDecryption = decryptWithKey(encryptedData, firstIV, KEY_ALIAS_MASTER)
+                    decryptWithKey(secondEncryptedData, firstIV, KEY_ALIAS_ENCRYPTION)
+                } else null
+            },
+
+            // Approach 3: Single decryption with master key
+            {
+                decryptWithKey(encryptedData, ivParts[0], KEY_ALIAS_MASTER)
+            },
+
+            // Approach 4: Single decryption with encryption key
+            {
+                decryptWithKey(encryptedData, ivParts[0], KEY_ALIAS_ENCRYPTION)
+            }
+        )
+
+        for ((index, approach) in approaches.withIndex()) {
+            try {
+                Log.d(TAG, "🔄 Trying legacy decryption approach ${index + 1}...")
+                val result = approach()
+                if (result != null && isValidPrivateKeyFormat(result)) {
+                    Log.d(TAG, "✅ Legacy decryption approach ${index + 1} succeeded")
+                    return result
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "❌ Legacy decryption approach ${index + 1} failed: ${e.message}")
+            }
+        }
+
+        Log.e(TAG, "❌ All legacy decryption approaches failed")
+        return null
+    }
+
+    /**
+     * Enhanced private key format validation
+     */
+    private fun isValidPrivateKeyFormat(privateKey: String): Boolean {
+        if (privateKey.isNullOrEmpty()) return false
+
+        return when {
+            // Standard format: 0x + 64 hex characters
+            privateKey.length == 66 &&
+                    privateKey.startsWith("0x") &&
+                    privateKey.substring(2).matches(Regex("^[0-9a-fA-F]{64}$")) -> true
+
+            // Alternative format: 64 hex characters (without 0x)
+            privateKey.length == 64 &&
+                    privateKey.matches(Regex("^[0-9a-fA-F]{64}$")) -> true
+
+            else -> false
+        }
+    }
+
+    /**
+     * Generate master key if needed (simplified - only one key needed)
+     */
+    private fun generateMasterKeyIfNeeded() {
+        try {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
+            keyStore.load(null)
+
+            if (!keyStore.containsAlias(KEY_ALIAS_MASTER)) {
+                Log.d(TAG, "🔑 Generating master key...")
+
+                val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+                val keyGenParameterSpec = KeyGenParameterSpec.Builder(
+                    KEY_ALIAS_MASTER,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setUserAuthenticationRequired(REQUIRE_USER_AUTH)
+                    .setRandomizedEncryptionRequired(true)
+                    .setKeySize(256)
+                    .build()
+
+                keyGenerator.init(keyGenParameterSpec)
+                keyGenerator.generateKey()
+
+                Log.d(TAG, "✅ Master key generated successfully")
+            } else {
+                Log.d(TAG, "✅ Master key already exists")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to retrieve private key", e)
-            null
+            Log.e(TAG, "❌ Failed to generate master key: ${e.message}", e)
+            throw SecurityException("Failed to generate master key", e)
+        }
+    }
+
+    /**
+     * Initialize security keys (simplified)
+     */
+    private fun initializeSecurityKeys() {
+        try {
+            generateMasterKeyIfNeeded()
+            Log.d(TAG, "✅ Security keys initialized (single encryption mode)")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to initialize security keys: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Check if keys can be accessed (diagnostic method)
+     */
+    fun validateKeyAccess(): Boolean {
+        return try {
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
+            keyStore.load(null)
+
+            // Check if master key exists and is accessible
+            val hasMasterKey = keyStore.containsAlias(KEY_ALIAS_MASTER)
+            if (!hasMasterKey) {
+                Log.e(TAG, "❌ Master key not found")
+                return false
+            }
+
+            // Try to get the key
+            val key = keyStore.getKey(KEY_ALIAS_MASTER, null)
+            if (key == null) {
+                Log.e(TAG, "❌ Master key exists but cannot be retrieved")
+                return false
+            }
+
+            // Test encryption/decryption
+            val testData = "test_encryption_${System.currentTimeMillis()}"
+            val encrypted = encryptWithKey(testData, KEY_ALIAS_MASTER)
+            val decrypted = decryptWithKey(encrypted.encryptedData, encrypted.iv, KEY_ALIAS_MASTER)
+
+            val isValid = testData == decrypted
+            Log.d(TAG, if (isValid) "✅ Key access validation successful" else "❌ Key access validation failed")
+
+            return isValid
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Key access validation failed: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Emergency method to clear corrupted keys and reinitialize
+     */
+    fun resetCorruptedKeys(): Boolean {
+        return try {
+            Log.w(TAG, "🔧 Resetting corrupted keys...")
+
+            // Clear stored data
+            clearStoredKeys()
+
+            // Remove keystore entries
+            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
+            keyStore.load(null)
+
+            if (keyStore.containsAlias(KEY_ALIAS_MASTER)) {
+                keyStore.deleteEntry(KEY_ALIAS_MASTER)
+                Log.d(TAG, "🗑️ Deleted master key from keystore")
+            }
+
+            // Optional: Also clean up old encryption key if it exists
+            if (keyStore.containsAlias(KEY_ALIAS_ENCRYPTION)) {
+                keyStore.deleteEntry(KEY_ALIAS_ENCRYPTION)
+                Log.d(TAG, "🗑️ Deleted encryption key from keystore")
+            }
+
+            // Reinitialize
+            initializeSecurityKeys()
+
+            // Validate
+            val isValid = validateKeyAccess()
+            Log.d(TAG, if (isValid) "✅ Key reset successful" else "❌ Key reset failed")
+
+            return isValid
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Key reset failed: ${e.message}", e)
+            false
         }
     }
 
@@ -629,20 +946,18 @@ class CryptoKeyManager(private val context: Context) {
         val generationMethod: String = "unknown"
     )
 
-    // [Additional private methods for encryption, validation, etc. - keeping the existing implementation but ensuring private key format compliance]
-
-    /**
-     * Initialize security keys
-     */
-    private fun initializeSecurityKeys() {
-        try {
-            generateMasterKeyIfNeeded()
-            generateEncryptionKeyIfNeeded()
-            Log.d(TAG, "✅ Security keys initialized")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize security keys", e)
-        }
-    }
+//    /**
+//     * Initialize security keys
+//     */
+//    private fun initializeSecurityKeys() {
+//        try {
+//            generateMasterKeyIfNeeded()
+//            generateEncryptionKeyIfNeeded()
+//            Log.d(TAG, "✅ Security keys initialized")
+//        } catch (e: Exception) {
+//            Log.e(TAG, "Failed to initialize security keys", e)
+//        }
+//    }
 
     /**
      * Test available cryptographic providers
@@ -680,35 +995,35 @@ class CryptoKeyManager(private val context: Context) {
         Log.d(TAG, "StrongBox backed keys configuration checked")
     }
 
-    /**
-     * Generate master key if it doesn't exist
-     */
-    private fun generateMasterKeyIfNeeded() {
-        try {
-            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
-            keyStore.load(null)
-
-            if (!keyStore.containsAlias(KEY_ALIAS_MASTER)) {
-                val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-                val keyGenParameterSpec = KeyGenParameterSpec.Builder(
-                    KEY_ALIAS_MASTER,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setUserAuthenticationRequired(REQUIRE_USER_AUTH)
-                    .setRandomizedEncryptionRequired(true)
-                    .setKeySize(256)
-                    .build()
-
-                keyGenerator.init(keyGenParameterSpec)
-                keyGenerator.generateKey()
-                Log.d(TAG, "✅ Master key generated")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to generate master key", e)
-        }
-    }
+//    /**
+//     * Generate master key if it doesn't exist
+//     */
+//    private fun generateMasterKeyIfNeeded() {
+//        try {
+//            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
+//            keyStore.load(null)
+//
+//            if (!keyStore.containsAlias(KEY_ALIAS_MASTER)) {
+//                val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+//                val keyGenParameterSpec = KeyGenParameterSpec.Builder(
+//                    KEY_ALIAS_MASTER,
+//                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+//                )
+//                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+//                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+//                    .setUserAuthenticationRequired(REQUIRE_USER_AUTH)
+//                    .setRandomizedEncryptionRequired(true)
+//                    .setKeySize(256)
+//                    .build()
+//
+//                keyGenerator.init(keyGenParameterSpec)
+//                keyGenerator.generateKey()
+//                Log.d(TAG, "✅ Master key generated")
+//            }
+//        } catch (e: Exception) {
+//            Log.e(TAG, "Failed to generate master key", e)
+//        }
+//    }
 
     /**
      * Generate encryption key if it doesn't exist
@@ -772,62 +1087,85 @@ class CryptoKeyManager(private val context: Context) {
     /**
      * Double encryption for enhanced security
      */
-    private fun doubleEncryptPrivateKey(privateKey: String): EncryptedData {
+//    private fun doubleEncryptPrivateKey(privateKey: String): EncryptedData {
+//        try {
+//            // First layer: encrypt with master key
+//            val firstEncryption = encryptWithKey(privateKey, KEY_ALIAS_MASTER)
+//
+//            // Second layer: encrypt with encryption key
+//            val secondEncryption = encryptWithKey(
+//                firstEncryption.encryptedData,
+//                KEY_ALIAS_ENCRYPTION
+//            )
+//
+//            // Store both IVs properly: firstIV::secondIV::firstEncryptedData
+//            val combinedIV = "${firstEncryption.iv}::${secondEncryption.iv}::${firstEncryption.encryptedData}"
+//
+//            return EncryptedData(
+//                encryptedData = secondEncryption.encryptedData,
+//                iv = combinedIV
+//            )
+//        } catch (e: Exception) {
+//            Log.e(TAG, "Double encryption failed: ${e.message}", e)
+//            throw SecurityException("Failed to encrypt data", e)
+//        }
+//    }
+
+    /**
+     * Simple single decryption for private key retrieval
+     * Uses only MASTER key for decryption - matches encryption process
+     */
+    private fun decryptPrivateKey(encryptedData: String, iv: String): String {
         try {
-            // First layer: encrypt with master key
-            val firstEncryption = encryptWithKey(privateKey, KEY_ALIAS_MASTER)
+            Log.d(TAG, "🔓 Starting single decryption process...")
 
-            // Second layer: encrypt with encryption key
-            val secondEncryption = encryptWithKey(
-                firstEncryption.encryptedData,
-                KEY_ALIAS_ENCRYPTION
-            )
+            val decryptedData = decryptWithKey(encryptedData, iv, KEY_ALIAS_MASTER)
 
-            // Store both IVs properly: firstIV::secondIV::firstEncryptedData
-            val combinedIV = "${firstEncryption.iv}::${secondEncryption.iv}::${firstEncryption.encryptedData}"
+            Log.d(TAG, "✅ Single decryption completed:")
+            Log.d(TAG, "   ├─ Key Alias: $KEY_ALIAS_MASTER")
+            Log.d(TAG, "   ├─ IV Length: ${iv.length}")
+            Log.d(TAG, "   └─ Decrypted Data Length: ${decryptedData.length}")
 
-            return EncryptedData(
-                encryptedData = secondEncryption.encryptedData,
-                iv = combinedIV
-            )
+            return decryptedData
+
         } catch (e: Exception) {
-            Log.e(TAG, "Double encryption failed: ${e.message}", e)
-            throw SecurityException("Failed to encrypt data", e)
+            Log.e(TAG, "❌ Single decryption failed: ${e.message}", e)
+            throw SecurityException("Failed to decrypt private key", e)
         }
     }
 
     /**
      * Double decrypt private key
      */
-    private fun doubleDecryptPrivateKey(encryptedData: String, iv: String): String {
-        try {
-            // Extract both IVs and first encrypted data
-            val ivParts = iv.split("::")
-            if (ivParts.size != 3) {
-                throw SecurityException("Invalid IV format for double decryption. Expected 3 parts, got ${ivParts.size}")
-            }
-
-            val firstIV = ivParts[0]          // IV used with master key
-            val secondIV = ivParts[1]         // IV used with encryption key
-            val firstEncryptedData = ivParts[2]  // Result of first encryption
-
-            // First layer: decrypt with encryption key using its correct IV
-            val firstDecryption = decryptWithKey(encryptedData, secondIV, KEY_ALIAS_ENCRYPTION)
-
-            // Verify that first decryption matches stored first encrypted data
-            if (firstDecryption != firstEncryptedData) {
-                throw SecurityException("First decryption verification failed")
-            }
-
-            // Second layer: decrypt with master key using its correct IV
-            val finalDecryption = decryptWithKey(firstEncryptedData, firstIV, KEY_ALIAS_MASTER)
-
-            return finalDecryption
-        } catch (e: Exception) {
-            Log.e(TAG, "Double decryption failed: ${e.message}", e)
-            throw SecurityException("Failed to decrypt data", e)
-        }
-    }
+//    private fun doubleDecryptPrivateKey(encryptedData: String, iv: String): String {
+//        try {
+//            // Extract both IVs and first encrypted data
+//            val ivParts = iv.split("::")
+//            if (ivParts.size != 3) {
+//                throw SecurityException("Invalid IV format for double decryption. Expected 3 parts, got ${ivParts.size}")
+//            }
+//
+//            val firstIV = ivParts[0]          // IV used with master key
+//            val secondIV = ivParts[1]         // IV used with encryption key
+//            val firstEncryptedData = ivParts[2]  // Result of first encryption
+//
+//            // First layer: decrypt with encryption key using its correct IV
+//            val firstDecryption = decryptWithKey(encryptedData, secondIV, KEY_ALIAS_ENCRYPTION)
+//
+//            // Verify that first decryption matches stored first encrypted data
+//            if (firstDecryption != firstEncryptedData) {
+//                throw SecurityException("First decryption verification failed")
+//            }
+//
+//            // Second layer: decrypt with master key using its correct IV
+//            val finalDecryption = decryptWithKey(firstEncryptedData, firstIV, KEY_ALIAS_MASTER)
+//
+//            return finalDecryption
+//        } catch (e: Exception) {
+//            Log.e(TAG, "Double decryption failed: ${e.message}", e)
+//            throw SecurityException("Failed to decrypt data", e)
+//        }
+//    }
 
     /**
      * Encrypt data with specific key alias
@@ -980,7 +1318,22 @@ class CryptoKeyManager(private val context: Context) {
      * Encrypt private key (single layer encryption)
      */
     private fun encryptPrivateKey(privateKey: String): EncryptedData {
-        return encryptWithKey(privateKey, KEY_ALIAS_MASTER)
+        try {
+            Log.d(TAG, "🔐 Starting single encryption process...")
+
+            val encryptedData = encryptWithKey(privateKey, KEY_ALIAS_MASTER)
+
+            Log.d(TAG, "✅ Single encryption completed:")
+            Log.d(TAG, "   ├─ Key Alias: $KEY_ALIAS_MASTER")
+            Log.d(TAG, "   ├─ IV Length: ${encryptedData.iv.length}")
+            Log.d(TAG, "   └─ Encrypted Data Length: ${encryptedData.encryptedData.length}")
+
+            return encryptedData
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Single encryption failed: ${e.message}", e)
+            throw SecurityException("Failed to encrypt private key", e)
+        }
     }
 
     /**
@@ -1036,104 +1389,42 @@ class CryptoKeyManager(private val context: Context) {
         }
     }
 
-    /**
-     * Validate that signing capabilities are available
-     */
-    fun canSignData(): Boolean {
-        return try {
-            val privateKey = getPrivateKey()
-            !privateKey.isNullOrEmpty()
-        } catch (e: Exception) {
-            Log.w(TAG, "Cannot validate signing capability: ${e.message}")
-            false
-        }
-    }
-
-    /**
-     * Verify wallet password
-     */
-    suspend fun verifyWalletPassword(password: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val encryptedKey = encryptedSharedPreferences.getString(ENCRYPTED_PRIVATE_KEY_KEY, null)
-            val iv = encryptedSharedPreferences.getString(IV_KEY, null)
-
-            if (encryptedKey == null || iv == null) {
-                return@withContext Result.failure(SecurityException("No wallet found"))
-            }
-
-            // Try to decrypt to verify password
-            val decryptedData = doubleDecryptPrivateKey(encryptedKey, iv)
-            decryptWithPassword(decryptedData, password) // This will throw if wrong password
-
-            Result.success(true)
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Password verification failed: ${e.message}")
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Debug method for troubleshooting key storage issues
-     */
-    fun debugKeyStorage(): String {
-        val debugInfo = StringBuilder()
-
-        try {
-            debugInfo.append("=== CRYPTO KEY MANAGER DEBUG ===\n")
-            debugInfo.append("Timestamp: ${System.currentTimeMillis()}\n\n")
-
-            // Check encrypted shared preferences
-            debugInfo.append("1. Encrypted SharedPreferences Status:\n")
-            val hasPublicKey = encryptedSharedPreferences.contains(PUBLIC_KEY_KEY)
-            val hasPrivateKey = encryptedSharedPreferences.contains(ENCRYPTED_PRIVATE_KEY_KEY)
-            val hasVoterAddress = encryptedSharedPreferences.contains(VOTER_ADDRESS_KEY)
-            val hasIV = encryptedSharedPreferences.contains(IV_KEY)
-
-            debugInfo.append("   - Public Key: ${if (hasPublicKey) "✅ Present" else "❌ Missing"}\n")
-            debugInfo.append("   - Private Key: ${if (hasPrivateKey) "✅ Present" else "❌ Missing"}\n")
-            debugInfo.append("   - Voter Address: ${if (hasVoterAddress) "✅ Present" else "❌ Missing"}\n")
-            debugInfo.append("   - IV: ${if (hasIV) "✅ Present" else "❌ Missing"}\n\n")
-
-            // Check key retrieval
-            debugInfo.append("2. Key Retrieval Test:\n")
-            val publicKey = getPublicKey()
-            val privateKey = getPrivateKey()
-            val voterAddress = getVoterAddress()
-
-            debugInfo.append("   - Public Key Retrieved: ${if (publicKey != null) "✅ Success" else "❌ Failed"}\n")
-            debugInfo.append("   - Private Key Retrieved: ${if (privateKey != null) "✅ Success" else "❌ Failed"}\n")
-            debugInfo.append("   - Voter Address Retrieved: ${if (voterAddress != null) "✅ Success" else "❌ Failed"}\n\n")
-
-            // Check key format validation
-            if (privateKey != null) {
-                debugInfo.append("3. Key Format Validation:\n")
-                val isValidFormat = isValidPrivateKeyFormat(privateKey)
-                debugInfo.append("   - Private Key Format: ${if (isValidFormat) "✅ Valid" else "❌ Invalid"}\n")
-                debugInfo.append("   - Private Key Length: ${privateKey.length} characters\n")
-                debugInfo.append("   - Expected Length: $PRIVATE_KEY_TOTAL_LENGTH characters\n\n")
-            }
-
-            // Check Android Keystore
-            debugInfo.append("4. Android Keystore Status:\n")
-            try {
-                val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
-                keyStore.load(null)
-                val hasMasterKey = keyStore.containsAlias(KEY_ALIAS_MASTER)
-                val hasEncryptionKey = keyStore.containsAlias(KEY_ALIAS_ENCRYPTION)
-
-                debugInfo.append("   - Master Key: ${if (hasMasterKey) "✅ Present" else "❌ Missing"}\n")
-                debugInfo.append("   - Encryption Key: ${if (hasEncryptionKey) "✅ Present" else "❌ Missing"}\n")
-            } catch (e: Exception) {
-                debugInfo.append("   - Keystore Access: ❌ Failed (${e.message})\n")
-            }
-
-        } catch (e: Exception) {
-            debugInfo.append("ERROR: ${e.message}\n")
-        }
-
-        return debugInfo.toString()
-    }
+//    /**
+//     * Validate that signing capabilities are available
+//     */
+//    fun canSignData(): Boolean {
+//        return try {
+//            val privateKey = getPrivateKey()
+//            !privateKey.isNullOrEmpty()
+//        } catch (e: Exception) {
+//            Log.w(TAG, "Cannot validate signing capability: ${e.message}")
+//            false
+//        }
+//    }
+//
+//    /**
+//     * Verify wallet password
+//     */
+//    suspend fun verifyWalletPassword(password: String): Result<Boolean> = withContext(Dispatchers.IO) {
+//        try {
+//            val encryptedKey = encryptedSharedPreferences.getString(ENCRYPTED_PRIVATE_KEY_KEY, null)
+//            val iv = encryptedSharedPreferences.getString(IV_KEY, null)
+//
+//            if (encryptedKey == null || iv == null) {
+//                return@withContext Result.failure(SecurityException("No wallet found"))
+//            }
+//
+//            // Try to decrypt to verify password
+//            val decryptedData = doubleDecryptPrivateKey(encryptedKey, iv)
+//            decryptWithPassword(decryptedData, password) // This will throw if wrong password
+//
+//            Result.success(true)
+//
+//        } catch (e: Exception) {
+//            Log.e(TAG, "Password verification failed: ${e.message}")
+//            Result.failure(e)
+//        }
+//    }
 
     /**
      * Repair corrupted keys by attempting recovery from backup sources
@@ -1306,136 +1597,136 @@ class CryptoKeyManager(private val context: Context) {
      * Force reload keys from encrypted storage and refresh internal state
      * @return Boolean - true jika berhasil reload, false jika gagal
      */
-    fun forceReloadKeys(): Boolean {
-        return try {
-            Log.d(TAG, "🔄 Force reloading keys from encrypted storage...")
-
-            // Step 1: Check if encrypted storage has keys
-            if (!hasStoredKeyPair()) {
-                Log.w(TAG, "❌ No keys found in encrypted storage")
-                return false
-            }
-
-            // Step 2: Force reload each key component
-            val privateKey = try {
-                val encryptedData = encryptedSharedPreferences.getString(ENCRYPTED_PRIVATE_KEY_KEY, null)
-                val iv = encryptedSharedPreferences.getString(IV_KEY, null)
-
-                if (encryptedData != null && iv != null) {
-                    val decryptedKey = doubleDecryptPrivateKey(encryptedData, iv)
-                    if (isValidPrivateKeyFormat(decryptedKey)) {
-                        decryptedKey
-                    } else {
-                        Log.e(TAG, "❌ Decrypted private key has invalid format")
-                        null
-                    }
-                } else {
-                    Log.e(TAG, "❌ Missing encrypted private key or IV")
-                    null
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to decrypt private key: ${e.message}")
-                null
-            }
-
-            val publicKey = try {
-                encryptedSharedPreferences.getString(PUBLIC_KEY_KEY, null)
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to load public key: ${e.message}")
-                null
-            }
-
-            val voterAddress = try {
-                encryptedSharedPreferences.getString(VOTER_ADDRESS_KEY, null)
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to load voter address: ${e.message}")
-                null
-            }
-
-            // Step 3: Validate that all keys were loaded successfully
-            if (privateKey == null || publicKey == null || voterAddress == null) {
-                Log.e(TAG, "❌ Failed to reload one or more keys")
-                Log.e(TAG, "Private key: ${if (privateKey != null) "✅" else "❌"}")
-                Log.e(TAG, "Public key: ${if (publicKey != null) "✅" else "❌"}")
-                Log.e(TAG, "Voter address: ${if (voterAddress != null) "✅" else "❌"}")
-                return false
-            }
-
-            // Step 4: Validate key formats
-            if (!isValidPrivateKeyFormat(privateKey)) {
-                Log.e(TAG, "❌ Reloaded private key has invalid format")
-                return false
-            }
-
-            if (!publicKey.startsWith("0x") || publicKey.length < 130) {
-                Log.e(TAG, "❌ Reloaded public key has invalid format")
-                return false
-            }
-
-            if (!voterAddress.startsWith("0x") || voterAddress.length != 42) {
-                Log.e(TAG, "❌ Reloaded voter address has invalid format")
-                return false
-            }
-
-            // Step 5: Verify consistency between public key and voter address
-            val derivedAddress = try {
-                val cleanPublicKey = if (publicKey.startsWith("0x")) {
-                    publicKey.substring(2)
-                } else {
-                    publicKey
-                }
-                val publicKeyBigInt = BigInteger(cleanPublicKey, 16)
-                val addressHex = org.web3j.crypto.Keys.getAddress(publicKeyBigInt)
-                org.web3j.crypto.Keys.toChecksumAddress("0x" + addressHex)
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to derive address for consistency check: ${e.message}")
-                null
-            }
-
-            if (derivedAddress != null && !derivedAddress.equals(voterAddress, ignoreCase = true)) {
-                Log.w(TAG, "⚠️ Address inconsistency detected during reload")
-                Log.w(TAG, "Stored: $voterAddress")
-                Log.w(TAG, "Derived: $derivedAddress")
-
-                // Fix the inconsistency
-                try {
-                    encryptedSharedPreferences.edit().apply {
-                        putString(VOTER_ADDRESS_KEY, derivedAddress)
-                        apply()
-                    }
-                    Log.d(TAG, "✅ Address inconsistency fixed during reload")
-                } catch (e: Exception) {
-                    Log.e(TAG, "❌ Failed to fix address inconsistency: ${e.message}")
-                    return false
-                }
-            }
-
-            // Step 6: Update metadata to indicate reload
-            try {
-                encryptedSharedPreferences.edit().apply {
-                    putLong("last_reload_time", System.currentTimeMillis())
-                    putString("last_reload_method", "Force_Reload")
-                    apply()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "⚠️ Failed to update reload metadata: ${e.message}")
-                // Don't fail the reload for metadata issues
-            }
-
-            // Step 7: Final validation
-            if (validateStoredKeys()) {
-                Log.d(TAG, "✅ Keys successfully force reloaded and validated")
-                return true
-            } else {
-                Log.e(TAG, "❌ Force reloaded keys failed final validation")
-                return false
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error during force reload: ${e.message}", e)
-            false
-        }
-    }
+//    fun forceReloadKeys(): Boolean {
+//        return try {
+//            Log.d(TAG, "🔄 Force reloading keys from encrypted storage...")
+//
+//            // Step 1: Check if encrypted storage has keys
+//            if (!hasStoredKeyPair()) {
+//                Log.w(TAG, "❌ No keys found in encrypted storage")
+//                return false
+//            }
+//
+//            // Step 2: Force reload each key component
+//            val privateKey = try {
+//                val encryptedData = encryptedSharedPreferences.getString(ENCRYPTED_PRIVATE_KEY_KEY, null)
+//                val iv = encryptedSharedPreferences.getString(IV_KEY, null)
+//
+//                if (encryptedData != null && iv != null) {
+//                    val decryptedKey = doubleDecryptPrivateKey(encryptedData, iv)
+//                    if (isValidPrivateKeyFormat(decryptedKey)) {
+//                        decryptedKey
+//                    } else {
+//                        Log.e(TAG, "❌ Decrypted private key has invalid format")
+//                        null
+//                    }
+//                } else {
+//                    Log.e(TAG, "❌ Missing encrypted private key or IV")
+//                    null
+//                }
+//            } catch (e: Exception) {
+//                Log.e(TAG, "❌ Failed to decrypt private key: ${e.message}")
+//                null
+//            }
+//
+//            val publicKey = try {
+//                encryptedSharedPreferences.getString(PUBLIC_KEY_KEY, null)
+//            } catch (e: Exception) {
+//                Log.e(TAG, "❌ Failed to load public key: ${e.message}")
+//                null
+//            }
+//
+//            val voterAddress = try {
+//                encryptedSharedPreferences.getString(VOTER_ADDRESS_KEY, null)
+//            } catch (e: Exception) {
+//                Log.e(TAG, "❌ Failed to load voter address: ${e.message}")
+//                null
+//            }
+//
+//            // Step 3: Validate that all keys were loaded successfully
+//            if (privateKey == null || publicKey == null || voterAddress == null) {
+//                Log.e(TAG, "❌ Failed to reload one or more keys")
+//                Log.e(TAG, "Private key: ${if (privateKey != null) "✅" else "❌"}")
+//                Log.e(TAG, "Public key: ${if (publicKey != null) "✅" else "❌"}")
+//                Log.e(TAG, "Voter address: ${if (voterAddress != null) "✅" else "❌"}")
+//                return false
+//            }
+//
+//            // Step 4: Validate key formats
+//            if (!isValidPrivateKeyFormat(privateKey)) {
+//                Log.e(TAG, "❌ Reloaded private key has invalid format")
+//                return false
+//            }
+//
+//            if (!publicKey.startsWith("0x") || publicKey.length < 130) {
+//                Log.e(TAG, "❌ Reloaded public key has invalid format")
+//                return false
+//            }
+//
+//            if (!voterAddress.startsWith("0x") || voterAddress.length != 42) {
+//                Log.e(TAG, "❌ Reloaded voter address has invalid format")
+//                return false
+//            }
+//
+//            // Step 5: Verify consistency between public key and voter address
+//            val derivedAddress = try {
+//                val cleanPublicKey = if (publicKey.startsWith("0x")) {
+//                    publicKey.substring(2)
+//                } else {
+//                    publicKey
+//                }
+//                val publicKeyBigInt = BigInteger(cleanPublicKey, 16)
+//                val addressHex = org.web3j.crypto.Keys.getAddress(publicKeyBigInt)
+//                org.web3j.crypto.Keys.toChecksumAddress("0x" + addressHex)
+//            } catch (e: Exception) {
+//                Log.e(TAG, "❌ Failed to derive address for consistency check: ${e.message}")
+//                null
+//            }
+//
+//            if (derivedAddress != null && !derivedAddress.equals(voterAddress, ignoreCase = true)) {
+//                Log.w(TAG, "⚠️ Address inconsistency detected during reload")
+//                Log.w(TAG, "Stored: $voterAddress")
+//                Log.w(TAG, "Derived: $derivedAddress")
+//
+//                // Fix the inconsistency
+//                try {
+//                    encryptedSharedPreferences.edit().apply {
+//                        putString(VOTER_ADDRESS_KEY, derivedAddress)
+//                        apply()
+//                    }
+//                    Log.d(TAG, "✅ Address inconsistency fixed during reload")
+//                } catch (e: Exception) {
+//                    Log.e(TAG, "❌ Failed to fix address inconsistency: ${e.message}")
+//                    return false
+//                }
+//            }
+//
+//            // Step 6: Update metadata to indicate reload
+//            try {
+//                encryptedSharedPreferences.edit().apply {
+//                    putLong("last_reload_time", System.currentTimeMillis())
+//                    putString("last_reload_method", "Force_Reload")
+//                    apply()
+//                }
+//            } catch (e: Exception) {
+//                Log.w(TAG, "⚠️ Failed to update reload metadata: ${e.message}")
+//                // Don't fail the reload for metadata issues
+//            }
+//
+//            // Step 7: Final validation
+//            if (validateStoredKeys()) {
+//                Log.d(TAG, "✅ Keys successfully force reloaded and validated")
+//                return true
+//            } else {
+//                Log.e(TAG, "❌ Force reloaded keys failed final validation")
+//                return false
+//            }
+//
+//        } catch (e: Exception) {
+//            Log.e(TAG, "❌ Error during force reload: ${e.message}", e)
+//            false
+//        }
+//    }
 
     /**
      * Enhanced comprehensive logging for key generation process
@@ -1486,117 +1777,6 @@ class CryptoKeyManager(private val context: Context) {
         Log.d(TAG, "   ├─ Key Version: ${keyPairInfo.keyVersion}")
         Log.d(TAG, "   └─ Access Count: ${keyPairInfo.accessCount}")
     }
-
-    /**
-     * Enhanced logging for Android Keystore operations
-     * Add this to storeKeyPair method
-     */
-    private fun logKeystoreStorageProcess(keyPairInfo: KeyPairInfo) {
-        Log.i(TAG, "💾 =================================================================")
-        Log.i(TAG, "💾 ANDROID KEYSTORE STORAGE PROCESS")
-        Log.i(TAG, "💾 =================================================================")
-
-        try {
-            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
-            keyStore.load(null)
-
-            Log.d(TAG, "🏪 KEYSTORE STATUS:")
-            Log.d(TAG, "   ├─ Keystore Type: $ANDROID_KEYSTORE")
-            Log.d(TAG, "   ├─ Master Key Alias: $KEY_ALIAS_MASTER")
-            Log.d(TAG, "   ├─ Encryption Key Alias: $KEY_ALIAS_ENCRYPTION")
-            Log.d(TAG, "   ├─ Master Key Exists: ${keyStore.containsAlias(KEY_ALIAS_MASTER)}")
-            Log.d(TAG, "   └─ Encryption Key Exists: ${keyStore.containsAlias(KEY_ALIAS_ENCRYPTION)}")
-
-            Log.d(TAG, "🔐 ENCRYPTION PROCESS:")
-            Log.d(TAG, "   ├─ Transformation: $TRANSFORMATION")
-            Log.d(TAG, "   ├─ GCM IV Length: $GCM_IV_LENGTH bytes")
-            Log.d(TAG, "   ├─ GCM Tag Length: $GCM_TAG_LENGTH bytes")
-            Log.d(TAG, "   └─ Double Encryption: ✅ Enabled")
-
-            // Before encryption
-            Log.d(TAG, "📝 STORAGE DATA:")
-            Log.d(TAG, "   ├─ Storing Public Key: ${keyPairInfo.publicKey.length} chars")
-            Log.d(TAG, "   ├─ Storing Private Key: ${keyPairInfo.privateKey.length} chars (will be encrypted)")
-            Log.d(TAG, "   ├─ Storing Voter Address: ${keyPairInfo.voterAddress}")
-            Log.d(TAG, "   ├─ Creation Time: ${keyPairInfo.creationTime}")
-            Log.d(TAG, "   └─ Generation Method: ${keyPairInfo.generationMethod}")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error during keystore logging: ${e.message}")
-        }
-    }
-
-    /**
-     * Enhanced logging for storage verification
-     * Add this after storeKeyPair completion
-     */
-    private fun logStorageVerification() {
-        Log.i(TAG, "🔍 =================================================================")
-        Log.i(TAG, "🔍 STORAGE VERIFICATION PROCESS")
-        Log.i(TAG, "🔍 =================================================================")
-
-        try {
-            // Check encrypted shared preferences
-            val hasPublicKey = encryptedSharedPreferences.contains(PUBLIC_KEY_KEY)
-            val hasPrivateKey = encryptedSharedPreferences.contains(ENCRYPTED_PRIVATE_KEY_KEY)
-            val hasVoterAddress = encryptedSharedPreferences.contains(VOTER_ADDRESS_KEY)
-            val hasIV = encryptedSharedPreferences.contains(IV_KEY)
-            val hasMetadata = encryptedSharedPreferences.contains(KEY_METADATA)
-
-            Log.d(TAG, "📦 STORED DATA VERIFICATION:")
-            Log.d(TAG, "   ├─ Public Key Stored: ${if (hasPublicKey) "✅" else "❌"}")
-            Log.d(TAG, "   ├─ Private Key Stored: ${if (hasPrivateKey) "✅" else "❌"}")
-            Log.d(TAG, "   ├─ Voter Address Stored: ${if (hasVoterAddress) "✅" else "❌"}")
-            Log.d(TAG, "   ├─ Encryption IV Stored: ${if (hasIV) "✅" else "❌"}")
-            Log.d(TAG, "   └─ Metadata Stored: ${if (hasMetadata) "✅" else "❌"}")
-
-            // Test retrieval
-            val retrievedPublicKey = getPublicKey()
-            val retrievedPrivateKey = getPrivateKey()
-            val retrievedVoterAddress = getVoterAddress()
-
-            Log.d(TAG, "🔄 RETRIEVAL TEST:")
-            Log.d(TAG, "   ├─ Public Key Retrieved: ${if (retrievedPublicKey != null) "✅ (${retrievedPublicKey.length} chars)" else "❌"}")
-            Log.d(TAG, "   ├─ Private Key Retrieved: ${if (retrievedPrivateKey != null) "✅ (${retrievedPrivateKey.length} chars)" else "❌"}")
-            Log.d(TAG, "   └─ Voter Address Retrieved: ${if (retrievedVoterAddress != null) "✅ ($retrievedVoterAddress)" else "❌"}")
-
-            // Validation test
-            if (retrievedPrivateKey != null) {
-                val isValidFormat = isValidPrivateKeyFormat(retrievedPrivateKey)
-                Log.d(TAG, "✅ FINAL VALIDATION:")
-                Log.d(TAG, "   ├─ Private Key Format Valid: ${if (isValidFormat) "✅" else "❌"}")
-                Log.d(TAG, "   └─ Ready for Use: ${if (isValidFormat && retrievedPublicKey != null && retrievedVoterAddress != null) "✅" else "❌"}")
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Storage verification failed: ${e.message}", e)
-        }
-    }
-
-    /**
-     * Enhanced error logging for failures
-     */
-    private fun logKeyGenerationFailure(method: String, error: String, exception: Exception? = null) {
-        Log.e(TAG, "❌ =================================================================")
-        Log.e(TAG, "❌ KEY GENERATION FAILURE")
-        Log.e(TAG, "❌ =================================================================")
-        Log.e(TAG, "💥 Failed Method: $method")
-        Log.e(TAG, "💥 Error Message: $error")
-        Log.e(TAG, "💥 Timestamp: ${System.currentTimeMillis()}")
-
-        if (exception != null) {
-            Log.e(TAG, "💥 Exception Type: ${exception.javaClass.simpleName}")
-            Log.e(TAG, "💥 Stack Trace:", exception)
-        }
-
-        // Fallback information
-        Log.d(TAG, "🔄 Available Fallback Methods:")
-        Log.d(TAG, "   ├─ BouncyCastle Provider: ${try { Security.getProvider("BC") != null } catch (e: Exception) { false }}")
-        Log.d(TAG, "   ├─ AndroidOpenSSL Provider: ${try { Security.getProvider("AndroidOpenSSL") != null } catch (e: Exception) { false }}")
-        Log.d(TAG, "   └─ SecureRandom Fallback: ✅ Always Available")
-    }
-
-
 
     /**
      * Validation helper for comprehensive key checking

@@ -109,13 +109,24 @@ fun CandidateSelectionScreen(
         electionViewModel.fetchElectionPairs()
     }
 
-    // FIXED: Handle legacy hasVoted state for backward compatibility
+    // Handle successful vote submission
     LaunchedEffect(hasVoted) {
-        if (hasVoted && !isSubmittingVote) {
-            Log.d("CandidateSelectionScreen", "Legacy vote completion detected - navigating to vote success")
+        if (hasVoted && isSubmittingVote) {
+            isSubmittingVote = false
+            Log.d("CandidateSelectionScreen", "Vote submitted successfully - navigating to vote success")
+            // Navigate to vote success screen
             navController.navigate("vote_success") {
                 popUpTo("candidate_selection/$categoryId") { inclusive = true }
             }
+        }
+    }
+
+    // Handle vote submission errors
+    LaunchedEffect(votingError) {
+        if (votingError != null && isSubmittingVote) {
+            isSubmittingVote = false
+            Log.e("CandidateSelectionScreen", "Vote submission error: $votingError")
+            // Handle error (show snackbar, etc.)
         }
     }
 
@@ -436,14 +447,6 @@ private fun CandidateCard(
     val context = LocalContext.current
     val strings = LanguageManager.getLocalizedStrings()
 
-    // Get appropriate local drawable resources for fallback data (combined photo)
-    val getCombinedPhotoDrawable = when (electionPair.election_no) {
-        "1" -> R.drawable.pc_anies
-        "2" -> R.drawable.pc_prabowo
-        "3" -> R.drawable.pc_ganjar
-        else -> R.drawable.pc_anies
-    }
-
     // Get the authenticated image loader
     val imageLoader = remember { CoilAuthHelper.getImageLoader(context) }
 
@@ -531,7 +534,7 @@ private fun CandidateCard(
                     if (isUsingFallbackData) {
                         // Use local drawable for fallback data
                         Image(
-                            painter = painterResource(id = getCombinedPhotoDrawable),
+                            painter = painterResource(id = R.drawable.ic_launcher_background),
                             contentDescription = "Candidate Pair Photo",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Fit
@@ -563,7 +566,7 @@ private fun CandidateCard(
                             error = {
                                 // On error, show fallback image
                                 Image(
-                                    painter = painterResource(id = getCombinedPhotoDrawable),
+                                    painter = painterResource(id = R.drawable.ic_launcher_background),
                                     contentDescription = "Candidate Pair Photo (Fallback)",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Fit
