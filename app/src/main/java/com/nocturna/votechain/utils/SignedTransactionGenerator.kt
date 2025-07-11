@@ -2,11 +2,14 @@ package com.nocturna.votechain.utils
 
 import android.util.Log
 import com.nocturna.votechain.blockchain.BlockchainConfig
+import com.nocturna.votechain.blockchain.BlockchainManager
 import com.nocturna.votechain.security.CryptoKeyManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.web3j.protocol.Web3j
 import org.web3j.protocol.http.HttpService
+import org.web3j.utils.Numeric
+import java.math.BigInteger
 import java.security.MessageDigest
 import java.security.SecureRandom
 
@@ -49,53 +52,47 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
                 return@withContext null
             }
 
-            // Step 2: Get cryptographic keys from user profile
-            val privateKey = cryptoKeyManager.getPrivateKey()
-            val publicKey = cryptoKeyManager.getPublicKey()
-            val voterAddress = cryptoKeyManager.getVoterAddress()
+            // Step 2: Prepare transaction parameters
+            val nonce = BigInteger.ZERO // Replace with actual nonce retrieval logic
+            val to = BlockchainConfig.activeNetwork.votingContractAddress
+            val value = BigInteger.ZERO
+            val data = "ElectionPair:$electionPairId;VoterId:$voterId;Region:$region"
+            val maxPriorityFeePerGas = BigInteger.valueOf(BlockchainConfig.Gas.MAX_PRIORITY_FEE_GWEI)
+            val maxFeePerGas = BigInteger.valueOf(BlockchainConfig.Gas.MAX_FEE_PER_GAS_GWEI)
+            val gasLimit = BigInteger.valueOf(BlockchainConfig.Gas.VOTE_GAS_LIMIT)
+            val chainId = BlockchainConfig.activeNetwork.chainId
+            val privateKeyHex = cryptoKeyManager.getPrivateKey()?.removePrefix("0x")
+                ?: throw IllegalArgumentException("Invalid private key")
 
-            if (privateKey.isNullOrEmpty() || publicKey.isNullOrEmpty()) {
-                Log.e(TAG, "❌ Required keys not available from user profile")
-                return@withContext null
+            // Fix: Ensure the private key is properly handled to maintain 256 bits
+            // Pad to 64 characters (32 bytes = 256 bits) and convert to byte array
+            val privateKeyBytes = privateKeyHex.padStart(64, '0').let {
+                Numeric.hexStringToByteArray(it)
+            }
+            // Use sign bit 1 (positive) to preserve all bytes including leading zeros
+            val privateKey = BigInteger(1, privateKeyBytes)
+
+            Log.d(TAG, "Private key bit length: ${privateKey.bitLength()}")
+
+            // Only check if the key is too large, not exactly 256 bits
+            if (privateKey.bitLength() > 256) {
+                throw IllegalArgumentException("Invalid private key length. Expected 256 bits.")
             }
 
-            Log.d(TAG, "✅ Keys retrieved from user profile")
-            Log.d(TAG, "  - Private key length: ${privateKey.length}")
-            Log.d(TAG, "  - Public key length: ${publicKey.length}")
-            Log.d(TAG, "  - Voter address: $voterAddress")
-
-            // Step 3: Create transaction data structure
-            val nonce = generateSecureNonce()
-            val transactionData = createTransactionData(
-                electionPairId, voterId, region, timestamp, nonce, voterAddress ?: ""
+            // Step 3: Generate signed transaction
+            val signedTransaction = BlockchainManager.createAndSignTransaction(
+                nonce,
+                to,
+                value,
+                data,
+                maxPriorityFeePerGas,
+                maxFeePerGas,
+                gasLimit,
+                chainId,
+                privateKey
             )
 
-            Log.d(TAG, "✅ Transaction data created")
-            Log.d(TAG, "  - Nonce: $nonce")
-            Log.d(TAG, "  - Data length: ${transactionData.length}")
-
-            // Step 4: Generate transaction hash
-            val transactionHash = generateTransactionHash(transactionData)
-            Log.d(TAG, "✅ Transaction hash generated: ${transactionHash.take(16)}...")
-
-            // Step 5: Sign the transaction using private key
-            val signature = signTransactionData(transactionHash, privateKey)
-            if (signature.isNullOrEmpty()) {
-                Log.e(TAG, "❌ Failed to sign transaction data")
-                return@withContext null
-            }
-
-            Log.d(TAG, "✅ Transaction signed successfully")
-            Log.d(TAG, "  - Signature length: ${signature.length}")
-
-            // Step 6: Create final signed transaction
-            val signedTransaction = createFinalSignedTransaction(
-                transactionData, transactionHash, signature, publicKey
-            )
-
-            Log.d(TAG, "✅ Enhanced signed transaction created")
-            Log.d(TAG, "  - Final transaction length: ${signedTransaction.length}")
-
+            Log.d(TAG, "✅ Signed transaction generated: ${signedTransaction.take(16)}...")
             return@withContext signedTransaction
 
         } catch (e: Exception) {

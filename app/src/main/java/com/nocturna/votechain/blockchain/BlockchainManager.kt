@@ -8,12 +8,17 @@ import org.web3j.crypto.Credentials
 import org.web3j.crypto.ECKeyPair
 import org.web3j.crypto.Keys
 import org.web3j.crypto.RawTransaction
+import org.web3j.crypto.Sign
 import org.web3j.crypto.TransactionEncoder
 import org.web3j.protocol.Web3j
 import org.web3j.protocol.core.DefaultBlockParameter
 import org.web3j.protocol.core.DefaultBlockParameterName
 import org.web3j.protocol.core.methods.response.EthBlock
 import org.web3j.protocol.http.HttpService
+import org.web3j.rlp.RlpEncoder
+import org.web3j.rlp.RlpList
+import org.web3j.rlp.RlpString
+import org.web3j.rlp.RlpType
 import org.web3j.utils.Convert
 import org.web3j.utils.Numeric
 import java.math.BigInteger
@@ -26,7 +31,7 @@ object BlockchainManager {
     private const val TAG = "BlockchainManager"
 
     private val web3j: Web3j by lazy {
-        val nodeUrl = "https://26629664f0de.ngrok-free.app"
+        val nodeUrl = "https://2085bfb6233a.ngrok-free.app"
         Log.d(TAG, "Initializing Web3j connection to $nodeUrl")
         Web3j.build(HttpService(nodeUrl))
     }
@@ -164,78 +169,6 @@ object BlockchainManager {
     }
 
     /**
-     * Register voter on smart contract (if applicable)
-     */
-    suspend fun registerVoterOnContract(voterAddress: String): String =
-        withContext(Dispatchers.IO) {
-            try {
-                Log.d(TAG, "📝 Registering voter on smart contract: $voterAddress")
-
-                // This is a placeholder implementation
-                // Replace with your actual smart contract interaction
-                val contractAddress = getVotingContractAddress()
-                if (contractAddress.isEmpty()) {
-                    Log.w(TAG, "⚠️ No voting contract configured")
-                    return@withContext ""
-                }
-
-                // Simulate contract registration
-                // In a real implementation, you would:
-                // 1. Load your voting contract
-                // 2. Call the register voter function
-                // 3. Return the transaction hash
-
-                delay(1000) // Simulate network delay
-                val mockTxHash = "0x" + generateMockTransactionHash()
-
-                Log.d(TAG, "✅ Voter registration transaction: $mockTxHash")
-                return@withContext mockTxHash
-
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Error registering voter on contract: ${e.message}", e)
-                return@withContext ""
-            }
-        }
-
-    /**
-     * Get gas price with fallback
-     */
-    suspend fun getCurrentGasPrice(): BigInteger = withContext(Dispatchers.IO) {
-        try {
-            val gasPrice = web3j.ethGasPrice().send().gasPrice
-            Log.d(TAG, "Current gas price: $gasPrice wei")
-            return@withContext gasPrice
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get gas price, using default: ${e.message}")
-            return@withContext Convert.toWei("20", Convert.Unit.GWEI).toBigInteger()
-        }
-    }
-
-    /**
-     * Estimate gas for transaction
-     */
-    suspend fun estimateGas(
-        from: String,
-        to: String,
-        value: BigInteger = BigInteger.ZERO,
-        data: String = ""
-    ): BigInteger = withContext(Dispatchers.IO) {
-        try {
-            val transaction =
-                org.web3j.protocol.core.methods.request.Transaction.createEthCallTransaction(
-                    from, to, data
-                )
-
-            val gasEstimate = web3j.ethEstimateGas(transaction).send().amountUsed
-            Log.d(TAG, "Estimated gas: $gasEstimate")
-            return@withContext gasEstimate
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to estimate gas, using default: ${e.message}")
-            return@withContext BigInteger.valueOf(21000)
-        }
-    }
-
-    /**
      * Wait for transaction confirmation
      */
     private suspend fun waitForTransactionConfirmation(
@@ -306,165 +239,52 @@ object BlockchainManager {
     }
 
     /**
-     * Check if address has sufficient balance for transaction
+     * Create and sign a raw Ethereum transaction using EIP-1559 standard
      */
-    suspend fun hasSufficientBalance(
-        address: String,
-        requiredAmount: String,
-        includeGas: Boolean = true
-    ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val balance = getAccountBalance(address).toDoubleOrNull() ?: 0.0
-            val required = requiredAmount.toDoubleOrNull() ?: 0.0
-
-            val gasEstimate = if (includeGas) {
-                val gasPrice = getCurrentGasPrice()
-                val gasLimit = BigInteger.valueOf(21000)
-                val gasCost = gasPrice.multiply(gasLimit)
-                Convert.fromWei(gasCost.toString(), Convert.Unit.ETHER).toDouble()
-            } else {
-                0.0
-            }
-
-            val totalRequired = required + gasEstimate
-            return@withContext balance >= totalRequired
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking balance: ${e.message}")
-            return@withContext false
-        }
-    }
-
-    /**
-     * Get transaction history for address (basic implementation)
-     */
-    suspend fun getTransactionHistory(
-        address: String,
-        fromBlock: String = "earliest",
-        toBlock: String = "latest"
-    ): List<TransactionInfo> = withContext(Dispatchers.IO) {
-        try {
-            val transactions = mutableListOf<TransactionInfo>()
-
-            // Get latest blocks and check for transactions
-            val latestBlock = web3j.ethBlockNumber().send().blockNumber
-            val startBlock = maxOf(latestBlock.subtract(BigInteger.valueOf(1000)), BigInteger.ZERO)
-
-            for (blockNumber in startBlock.toLong()..latestBlock.toLong()) {
-                try {
-                    val block = web3j.ethGetBlockByNumber(
-                        DefaultBlockParameter.valueOf(BigInteger.valueOf(blockNumber)),
-                        true
-                    ).send().block
-
-                    block.transactions.forEach { tx ->
-                        val transaction = tx as? EthBlock.TransactionObject
-                        if (transaction?.to?.equals(address, ignoreCase = true) == true ||
-                            transaction?.from?.equals(address, ignoreCase = true) == true
-                        ) {
-
-                            transactions.add(
-                                TransactionInfo(
-                                    hash = transaction.hash,
-                                    from = transaction.from,
-                                    to = transaction.to ?: "",
-                                    value = Convert.fromWei(
-                                        transaction.value.toString(),
-                                        Convert.Unit.ETHER
-                                    ).toString(),
-                                    blockNumber = transaction.blockNumber.toLong(),
-                                    timestamp = System.currentTimeMillis() // Approximate
-                                )
-                            )
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Continue with next block if one fails
-                    continue
-                }
-            }
-
-            return@withContext transactions.take(50) // Limit to 50 recent transactions
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting transaction history: ${e.message}")
-            return@withContext emptyList()
-        }
-    }
-
-    /**
-     * Enhanced connection checking with retry mechanism
-     */
-    suspend fun isConnectedWithRetry(maxRetries: Int = 3): Boolean = withContext(Dispatchers.IO) {
-        repeat(maxRetries) { attempt ->
-            try {
-                val isConnected = web3j.web3ClientVersion().send().web3ClientVersion.isNotEmpty()
-                if (isConnected) {
-                    Log.d(TAG, "✅ Blockchain connection successful on attempt ${attempt + 1}")
-                    return@withContext true
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Connection attempt ${attempt + 1} failed: ${e.message}")
-                if (attempt < maxRetries - 1) {
-                    delay(1000L * (attempt + 1))
-                }
-            }
-        }
-        Log.e(TAG, "❌ All connection attempts failed")
-        return@withContext false
-    }
-
-    /**
-     * Get account balance with retry mechanism and better error handling
-     */
-    suspend fun getAccountBalanceWithRetry(
-        address: String,
-        maxRetries: Int = 3
+    suspend fun createAndSignTransaction(
+        nonce: BigInteger,
+        to: String,
+        value: BigInteger,
+        data: String,
+        maxPriorityFeePerGas: BigInteger,
+        maxFeePerGas: BigInteger,
+        gasLimit: BigInteger,
+        chainId: Long,
+        privateKey: BigInteger
     ): String = withContext(Dispatchers.IO) {
-        repeat(maxRetries) { attempt ->
-            try {
-                val balanceWei =
-                    web3j.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().balance
-                val balanceEth = Convert.fromWei(balanceWei.toString(), Convert.Unit.ETHER)
-                val formattedBalance = String.format("%.8f", balanceEth.toDouble())
-
-                Log.d(TAG, "✅ Balance fetched successfully: $formattedBalance ETH for $address")
-                return@withContext formattedBalance
-            } catch (e: Exception) {
-                Log.w(TAG, "Balance fetch attempt ${attempt + 1} failed: ${e.message}")
-                if (attempt < maxRetries - 1) {
-                    delay(500L * (attempt + 1))
-                }
-            }
-        }
-
-        Log.e(TAG, "❌ Failed to fetch balance after $maxRetries attempts")
-        return@withContext "0.00000000"
-    }
-
-    /**
-     * Get detailed connection status
-     */
-    suspend fun getDetailedConnectionStatus(): ConnectionStatus = withContext(Dispatchers.IO) {
         try {
-            val isConnected = isConnected()
-            if (!isConnected) {
-                return@withContext ConnectionStatus(false, error = "Not connected to blockchain")
+            // Validate private key
+            if (privateKey.bitLength() > 256) {
+                throw IllegalArgumentException("Invalid private key length. Expected 256 bits.")
             }
 
-            val networkId = web3j.netVersion().send().netVersion
-            val latestBlock = web3j.ethBlockNumber().send().blockNumber.toLong()
-            val gasPrice = getCurrentGasPrice().toString()
+            Log.d(TAG, "Creating transaction with chainId: $chainId")
 
-            ConnectionStatus(
-                isConnected = true,
-                networkId = networkId,
-                latestBlock = latestBlock,
-                gasPrice = gasPrice
+            // Create transaction
+            val rawTransaction = RawTransaction.createTransaction(
+                BigInteger.valueOf(chainId),
+                nonce,
+                gasLimit,
+                to,
+                value,
+                data,
+                maxPriorityFeePerGas,
+                maxFeePerGas
             )
+
+            // Create Credentials object directly from the private key
+            val credentials = Credentials.create(privateKey.toString(16))
+
+            // Use the SignedRawTransaction utility for more reliable signing
+            val signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials)
+            val hexValue = Numeric.toHexString(signedMessage)
+
+            Log.d(TAG, "✅ Transaction signed successfully, hex length: ${hexValue.length}")
+            return@withContext hexValue
+
         } catch (e: Exception) {
-            ConnectionStatus(
-                isConnected = false,
-                error = e.message
-            )
+            Log.e(TAG, "Error creating and signing transaction: ${e.message}", e)
+            throw RuntimeException("Error creating and signing transaction: ${e.message}", e)
         }
     }
 }

@@ -47,7 +47,6 @@ import com.nocturna.votechain.ui.components.DataUpdateNotification
 import com.nocturna.votechain.ui.components.ElectionComparisonCard
 import com.nocturna.votechain.ui.components.ElectionStatsSummary
 import com.nocturna.votechain.ui.components.ElectionUpdateTimer
-import com.nocturna.votechain.ui.components.ParticipationTrendChart
 import com.nocturna.votechain.ui.components.RealTimeStatsBar
 import com.nocturna.votechain.ui.components.RefreshControlPanel
 import com.nocturna.votechain.ui.components.RegionalPerformanceMap
@@ -416,14 +415,14 @@ fun LiveResultScreen(
                         }
 
                         // Participation Trend Chart
-                        if (allElectionsData.isNotEmpty() && electionPairs.isNotEmpty()) {
-                            item {
-                                ParticipationTrendChart(
-                                    electionsData = allElectionsData,
-                                    electionPairs = electionPairs
-                                )
-                            }
-                        }
+//                        if (allElectionsData.isNotEmpty() && electionPairs.isNotEmpty()) {
+//                            item {
+//                                ParticipationTrendChart(
+//                                    electionsData = allElectionsData,
+//                                    electionPairs = electionPairs
+//                                )
+//                            }
+//                        }
 
                         // Regional Performance Map
                         if (allElectionsData.isNotEmpty() && electionPairs.isNotEmpty()) {
