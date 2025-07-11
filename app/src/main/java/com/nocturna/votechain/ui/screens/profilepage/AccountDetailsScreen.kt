@@ -357,45 +357,6 @@ fun AccountDetailsScreen(
         }
     }
 
-    // Function to refresh balance
-    fun refreshVoterData() {
-        scope.launch {
-            try {
-                isRefreshing = true
-                errorMessage = null
-
-                val userEmail = userLoginRepository.getUserEmail()
-                val userToken = userLoginRepository.getUserToken()
-
-                if (userEmail.isNullOrEmpty() || userToken.isEmpty()) {
-                    snackbarHostState.showSnackbar("Session expired. Please login again.")
-                    return@launch
-                }
-
-                Log.d("AccountDetails", "🔄 Refreshing voter data for: $userEmail")
-
-                // Force refresh from API
-                voterRepository.fetchVoterData(userToken).fold(
-                    onSuccess = { voterData ->
-                        updateAccountDataWithVoterData(userEmail, voterData)
-                        snackbarHostState.showSnackbar("Profile data refreshed successfully")
-                        Log.d("AccountDetails", "✅ Voter data refresh successful")
-                    },
-                    onFailure = { error ->
-                        Log.e("AccountDetails", "❌ Voter data refresh failed: ${error.message}")
-                        snackbarHostState.showSnackbar("Failed to refresh: ${error.message}")
-                    }
-                )
-
-            } catch (e: Exception) {
-                Log.e("AccountDetails", "❌ Exception during refresh: ${e.message}", e)
-                snackbarHostState.showSnackbar("Refresh error: ${e.message}")
-            } finally {
-                isRefreshing = false
-            }
-        }
-    }
-
     // Function to copy text to clipboard
     fun copyToClipboard(text: String, label: String) {
         clipboardManager.setText(AnnotatedString(text))
@@ -498,34 +459,6 @@ fun AccountDetailsScreen(
                 Column(
                     modifier = Modifier.padding(24.dp)
                 ) {
-//                    Row(
-//                        modifier = Modifier.fillMaxWidth(),
-//                        horizontalArrangement = Arrangement.SpaceBetween,
-//                        verticalAlignment = Alignment.CenterVertically
-//                    ) {
-//                        Text(
-//                            text = "Profile Information",
-//                            style = AppTypography.heading4Bold,
-//                            color = NeutralColors.Neutral70
-//                        )
-//
-//                        if (!isLoading) {
-//                            IconButton(
-//                                onClick = { refreshVoterData() },
-//                                enabled = !isRefreshing
-//                            ) {
-//                                Icon(
-//                                    painter = painterResource(id = R.drawable.back),
-//                                    contentDescription = "Refresh Profile Data",
-//                                    tint = if (isRefreshing) NeutralColors.Neutral40 else MainColors.Primary1,
-//                                    modifier = Modifier.size(24.dp)
-//                                )
-//                            }
-//                        }
-//                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
                     // Balance
                     Text(
                         text = strings.balance,

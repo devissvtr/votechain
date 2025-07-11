@@ -1,8 +1,6 @@
 package com.nocturna.votechain.blockchain
 
 import android.util.Log
-import com.nocturna.votechain.blockchain.BlockchainManager.getCurrentGasPrice
-import com.nocturna.votechain.blockchain.BlockchainManager.isConnected
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -18,10 +16,8 @@ import org.web3j.protocol.core.methods.response.EthBlock
 import org.web3j.protocol.http.HttpService
 import org.web3j.utils.Convert
 import org.web3j.utils.Numeric
-import java.math.BigDecimal
 import java.math.BigInteger
 import java.security.SecureRandom
-import kotlin.text.toLong
 
 /**
  * Singleton to manage Web3j connections and blockchain operations
@@ -30,7 +26,7 @@ object BlockchainManager {
     private const val TAG = "BlockchainManager"
 
     private val web3j: Web3j by lazy {
-        val nodeUrl = "https://8ecd64b8ee3e.ngrok-free.app"
+        val nodeUrl = "https://26629664f0de.ngrok-free.app"
         Log.d(TAG, "Initializing Web3j connection to $nodeUrl")
         Web3j.build(HttpService(nodeUrl))
     }
@@ -82,7 +78,8 @@ object BlockchainManager {
      */
     suspend fun getAccountBalance(address: String): String = withContext(Dispatchers.IO) {
         try {
-            val balanceWei = web3j.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().balance
+            val balanceWei =
+                web3j.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().balance
             val balanceEth = Convert.fromWei(balanceWei.toString(), Convert.Unit.ETHER)
 
             // Format to 8 decimal places
@@ -99,8 +96,9 @@ object BlockchainManager {
      * @param voterAddress Address to fund
      * @return Transaction hash if successful, empty string if failed
      */
-    suspend fun fundVoterAddress(voterAddress: String,
-                                 amount: String = "0.001"
+    suspend fun fundVoterAddress(
+        voterAddress: String,
+        amount: String = "0.001"
     ): String = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "🔗 Attempting to fund voter address: $voterAddress with $amount ETH")
@@ -118,7 +116,10 @@ object BlockchainManager {
             val requiredAmount = amount.toDoubleOrNull() ?: 0.001
 
             if (fundingBalanceEth < requiredAmount) {
-                Log.w(TAG, "⚠️ Insufficient funding balance: $fundingBalanceEth ETH (required: $requiredAmount ETH)")
+                Log.w(
+                    TAG,
+                    "⚠️ Insufficient funding balance: $fundingBalanceEth ETH (required: $requiredAmount ETH)"
+                )
                 return@withContext ""
             }
 
@@ -138,7 +139,8 @@ object BlockchainManager {
                 amountWei
             )
 
-            val signedTransaction = TransactionEncoder.signMessage(transaction, fundingAccount.credentials)
+            val signedTransaction =
+                TransactionEncoder.signMessage(transaction, fundingAccount.credentials)
             val transactionHash = web3j.ethSendRawTransaction(
                 Numeric.toHexString(signedTransaction)
             ).send().transactionHash
@@ -164,35 +166,36 @@ object BlockchainManager {
     /**
      * Register voter on smart contract (if applicable)
      */
-    suspend fun registerVoterOnContract(voterAddress: String): String = withContext(Dispatchers.IO) {
-        try {
-            Log.d(TAG, "📝 Registering voter on smart contract: $voterAddress")
+    suspend fun registerVoterOnContract(voterAddress: String): String =
+        withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "📝 Registering voter on smart contract: $voterAddress")
 
-            // This is a placeholder implementation
-            // Replace with your actual smart contract interaction
-            val contractAddress = getVotingContractAddress()
-            if (contractAddress.isEmpty()) {
-                Log.w(TAG, "⚠️ No voting contract configured")
+                // This is a placeholder implementation
+                // Replace with your actual smart contract interaction
+                val contractAddress = getVotingContractAddress()
+                if (contractAddress.isEmpty()) {
+                    Log.w(TAG, "⚠️ No voting contract configured")
+                    return@withContext ""
+                }
+
+                // Simulate contract registration
+                // In a real implementation, you would:
+                // 1. Load your voting contract
+                // 2. Call the register voter function
+                // 3. Return the transaction hash
+
+                delay(1000) // Simulate network delay
+                val mockTxHash = "0x" + generateMockTransactionHash()
+
+                Log.d(TAG, "✅ Voter registration transaction: $mockTxHash")
+                return@withContext mockTxHash
+
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error registering voter on contract: ${e.message}", e)
                 return@withContext ""
             }
-
-            // Simulate contract registration
-            // In a real implementation, you would:
-            // 1. Load your voting contract
-            // 2. Call the register voter function
-            // 3. Return the transaction hash
-
-            delay(1000) // Simulate network delay
-            val mockTxHash = "0x" + generateMockTransactionHash()
-
-            Log.d(TAG, "✅ Voter registration transaction: $mockTxHash")
-            return@withContext mockTxHash
-
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error registering voter on contract: ${e.message}", e)
-            return@withContext ""
         }
-    }
 
     /**
      * Get gas price with fallback
@@ -218,9 +221,10 @@ object BlockchainManager {
         data: String = ""
     ): BigInteger = withContext(Dispatchers.IO) {
         try {
-            val transaction = org.web3j.protocol.core.methods.request.Transaction.createEthCallTransaction(
-                from, to, data
-            )
+            val transaction =
+                org.web3j.protocol.core.methods.request.Transaction.createEthCallTransaction(
+                    from, to, data
+                )
 
             val gasEstimate = web3j.ethEstimateGas(transaction).send().amountUsed
             Log.d(TAG, "Estimated gas: $gasEstimate")
@@ -246,7 +250,10 @@ object BlockchainManager {
                 if (receipt.transactionReceipt.isPresent) {
                     val txReceipt = receipt.transactionReceipt.get()
                     val success = txReceipt.status == "0x1"
-                    Log.d(TAG, "Transaction $transactionHash confirmed with status: ${txReceipt.status}")
+                    Log.d(
+                        TAG,
+                        "Transaction $transactionHash confirmed with status: ${txReceipt.status}"
+                    )
                     return@withContext success
                 }
             } catch (e: Exception) {
@@ -352,14 +359,18 @@ object BlockchainManager {
                     block.transactions.forEach { tx ->
                         val transaction = tx as? EthBlock.TransactionObject
                         if (transaction?.to?.equals(address, ignoreCase = true) == true ||
-                            transaction?.from?.equals(address, ignoreCase = true) == true) {
+                            transaction?.from?.equals(address, ignoreCase = true) == true
+                        ) {
 
                             transactions.add(
                                 TransactionInfo(
                                     hash = transaction.hash,
                                     from = transaction.from,
                                     to = transaction.to ?: "",
-                                    value = Convert.fromWei(transaction.value.toString(), Convert.Unit.ETHER).toString(),
+                                    value = Convert.fromWei(
+                                        transaction.value.toString(),
+                                        Convert.Unit.ETHER
+                                    ).toString(),
                                     blockNumber = transaction.blockNumber.toLong(),
                                     timestamp = System.currentTimeMillis() // Approximate
                                 )
@@ -410,7 +421,8 @@ object BlockchainManager {
     ): String = withContext(Dispatchers.IO) {
         repeat(maxRetries) { attempt ->
             try {
-                val balanceWei = web3j.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().balance
+                val balanceWei =
+                    web3j.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().balance
                 val balanceEth = Convert.fromWei(balanceWei.toString(), Convert.Unit.ETHER)
                 val formattedBalance = String.format("%.8f", balanceEth.toDouble())
 

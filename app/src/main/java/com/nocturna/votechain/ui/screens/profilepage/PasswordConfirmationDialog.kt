@@ -263,7 +263,7 @@ fun PasswordConfirmationDialog(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Verifying...",
+                                        text = "Verifying",
                                         style = AppTypography.paragraphMedium,
                                         color = NeutralColors.Neutral10
                                     )

@@ -68,8 +68,6 @@ fun AcceptedScreen(
         // Login button
         Button(
             onClick = {
-                // Clear the approved registration state since user is proceeding to login
-                // This ensures that if they come back to register, they won't be stuck
                 viewModel.clearRegistrationState()
                 onLoginClick()
             },
@@ -87,13 +85,5 @@ fun AcceptedScreen(
                 color = NeutralColors.Neutral10
             )
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun VerificationApprovedScreenPreview() {
-    VotechainTheme {
-        AcceptedScreen()
     }
 }

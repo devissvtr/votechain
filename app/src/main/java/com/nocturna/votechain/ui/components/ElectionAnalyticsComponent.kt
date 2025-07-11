@@ -184,61 +184,61 @@ fun ElectionComparisonItem(
     }
 }
 
-@Composable
-fun ParticipationTrendChart(
-    electionsData: Map<String, LiveElectionData>,
-    electionPairs: List<ElectionPair>
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(8.dp, RoundedCornerShape(16.dp)),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp)
-        ) {
-            Text(
-                text = "Participation Rate Trend",
-                style = AppTypography.heading5Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Chart area
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-            ) {
-                ParticipationLineChart(
-                    electionsData = electionsData,
-                    electionPairs = electionPairs
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Legend
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                items(electionsData.toList()) { (electionId, data) ->
-                    val electionPair = electionPairs.find { it.id == electionId }
-                    if (electionPair != null) {
-                        ParticipationLegendItem(
-                            electionPair = electionPair,
-                            participationRate = data.overallPercentage
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
+//@Composable
+//fun ParticipationTrendChart(
+//    electionsData: Map<String, LiveElectionData>,
+//    electionPairs: List<ElectionPair>
+//) {
+//    Card(
+//        modifier = Modifier
+//            .fillMaxWidth()
+//            .shadow(8.dp, RoundedCornerShape(16.dp)),
+//        shape = RoundedCornerShape(16.dp)
+//    ) {
+//        Column(
+//            modifier = Modifier
+//                .fillMaxWidth()
+//                .padding(20.dp)
+//        ) {
+//            Text(
+//                text = "Participation Rate Trend",
+//                style = AppTypography.heading5Bold,
+//                color = MaterialTheme.colorScheme.onSurface
+//            )
+//
+//            Spacer(modifier = Modifier.height(16.dp))
+//
+//            // Chart area
+//            Box(
+//                modifier = Modifier
+//                    .fillMaxWidth()
+//                    .height(200.dp)
+//            ) {
+//                ParticipationLineChart(
+//                    electionsData = electionsData,
+//                    electionPairs = electionPairs
+//                )
+//            }
+//
+//            Spacer(modifier = Modifier.height(16.dp))
+//
+//            // Legend
+//            LazyRow(
+//                horizontalArrangement = Arrangement.spacedBy(16.dp)
+//            ) {
+//                items(electionsData.toList()) { (electionId, data) ->
+//                    val electionPair = electionPairs.find { it.id == electionId }
+//                    if (electionPair != null) {
+//                        ParticipationLegendItem(
+//                            electionPair = electionPair,
+//                            participationRate = data.overallPercentage
+//                        )
+//                    }
+//                }
+//            }
+//        }
+//    }
+//}
 
 @Composable
 fun ParticipationLineChart(

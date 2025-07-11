@@ -21,7 +21,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.nocturna.votechain.data.model.NewsItem
 import com.nocturna.votechain.ui.screens.LoadingScreen
-import com.nocturna.votechain.ui.screens.OTPVerificationScreen
 import com.nocturna.votechain.ui.screens.SplashScreen
 import com.nocturna.votechain.ui.screens.auth.EmailVerificationScreen
 import com.nocturna.votechain.ui.screens.forgotpassword.ResetPasswordScreen
@@ -430,27 +429,11 @@ fun VotechainNavGraph(
         composable(
             route = "vote_success/{voteId}",
             arguments = listOf(navArgument("voteId") { type = NavType.StringType })
-        ) { backStackEntry ->
-            val voteId = backStackEntry.arguments?.getString("voteId") ?: ""
-
+        ) {
             VoteSuccessScreen(
-                navController = navController,
-                voteId = voteId
+                navController = navController
             )
         }
-
-        // FIXED: Voting Detail screen implementation
-//        composable(
-//            "voting_detail/{categoryId}",
-//            arguments = listOf(navArgument("categoryId") { type = NavType.StringType })
-//        ) {
-//            val categoryId = it.arguments?.getString("categoryId") ?: ""
-//            VotingDetailScreen(
-//                categoryId = categoryId,
-//                navController = navController,
-//                viewModel = votingViewModel // Use the ViewModel with proper factory
-//            )
-//        }
 
         composable("results") {
             ResultsScreen(navController, votingViewModel)
@@ -492,13 +475,12 @@ fun VotechainNavGraph(
                         popUpTo("profile") { inclusive = true }
                         launchSingleTop = true
                     }
+                },
+                onLogout = {
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
+                    }
                 }
-//                onLogout = {
-//                    // Navigate to login screen and clear all previous screens from back stack
-//                    navController.navigate("login") {
-//                        popUpTo(0) { inclusive = true }
-//                    }
-//                }
             )
         }
 

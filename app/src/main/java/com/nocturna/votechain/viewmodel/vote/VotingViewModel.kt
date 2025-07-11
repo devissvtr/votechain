@@ -60,7 +60,7 @@ class VotingViewModel(private val context: Context,
             _voteState.value = VoteState.Loading
             _isLoading.value = true
 
-            repository.castVoteWithSignedTransaction(electionPairId, region, otpToken)
+            repository.castVoteWithSignedTransaction(electionPairId, region)
                 .collect { result ->
                     _isLoading.value = false
                     result.fold(

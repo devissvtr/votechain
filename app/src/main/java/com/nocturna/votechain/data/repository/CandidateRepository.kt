@@ -40,7 +40,7 @@ class CandidateRepository {
                 religion = "Islam",
                 education = "S3",
                 occupation = "Karyawan Swasta",
-                photoResId = R.drawable.pc_anies
+                photoResId = R.drawable.ic_launcher_background
             ),
             educationHistory = listOf(
                 EducationEntry("SD Negeri Laboratori 2 Yogyakarta", "1976 - 1982"),
@@ -71,7 +71,7 @@ class CandidateRepository {
                 religion = "Islam",
                 education = "S1",
                 occupation = "Pengusaha",
-                photoResId = R.drawable.pc_prabowo
+                photoResId = R.drawable.ic_launcher_background
             ),
             educationHistory = listOf(
                 EducationEntry("Akademi Militer", "1970 - 1974"),
@@ -95,7 +95,7 @@ class CandidateRepository {
                 religion = "Islam",
                 education = "S1",
                 occupation = "Politisi",
-                photoResId = R.drawable.pc_ganjar
+                photoResId = R.drawable.ic_launcher_background
             ),
             educationHistory = listOf(
                 EducationEntry("SDN Manahan 1 Surakarta", "1976 - 1982"),
@@ -124,7 +124,7 @@ class CandidateRepository {
                 religion = "Islam",
                 education = "S1",
                 occupation = "Politisi",
-                photoResId = R.drawable.pc_imin
+                photoResId = R.drawable.ic_launcher_background
             ),
             educationHistory = listOf(
                 EducationEntry("Pondok Pesantren Tebuireng, Jombang", "1978 - 1984"),
@@ -152,7 +152,7 @@ class CandidateRepository {
                 religion = "Islam",
                 education = "S2",
                 occupation = "Walikota Solo",
-                photoResId = R.drawable.pc_gibran
+                photoResId = R.drawable.ic_launcher_background
             ),
             educationHistory = listOf(
                 EducationEntry("Singapore Management University", "2005 - 2007"),
@@ -178,7 +178,7 @@ class CandidateRepository {
                 religion = "Islam",
                 education = "S3",
                 occupation = "Menteri Koordinator Bidang Politik, Hukum, dan Keamanan",
-                photoResId = R.drawable.pc_mahfud
+                photoResId = R.drawable.ic_launcher_background
             ),
             educationHistory = listOf(
                 EducationEntry("Fakultas Hukum, Universitas Islam Indonesia, Yogyakarta", "1979 - 1983"),

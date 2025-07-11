@@ -13,7 +13,6 @@ object BlockchainConfig {
         val chainId: Long,
         val rpcUrl: String,
         val votingContractAddress: String,
-//        val explorerUrl: String
     ) {
         CUSTOM(
             chainId = 1337,
@@ -50,15 +49,6 @@ object BlockchainConfig {
     }
 
     /**
-     * Transaction configuration
-     */
-    object Transaction {
-        const val CONFIRMATION_BLOCKS = 3
-        const val TIMEOUT_SECONDS = 120
-        const val MAX_RETRY_ATTEMPTS = 3
-    }
-
-    /**
      * Get current network configuration
      */
     fun getCurrentNetwork(): Network = activeNetwork
@@ -69,18 +59,4 @@ object BlockchainConfig {
     fun switchNetwork(network: Network) {
         activeNetwork = network
     }
-//
-//    /**
-//     * Get transaction explorer URL
-//     */
-//    fun getTransactionUrl(txHash: String): String {
-//        return "${activeNetwork.explorerUrl}/tx/$txHash"
-//    }
-//
-//    /**
-//     * Get address explorer URL
-//     */
-//    fun getAddressUrl(address: String): String {
-//        return "${activeNetwork.explorerUrl}/address/$address"
-//    }
 }

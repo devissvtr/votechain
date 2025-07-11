@@ -41,6 +41,8 @@ class VoteChainApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        scheduleKeyHealthChecks()
+
         instance = this
 
         Log.d(TAG, "🚀 VoteChain Application starting with enhanced key management...")
@@ -223,25 +225,6 @@ class VoteChainApplication : Application() {
     }
 
     /**
-     * Get key status report (untuk monitoring)
-     */
-    fun getKeyStatusReport(userEmail: String): StartupInitializer.KeyStatusReport {
-        return try {
-            getStartupInitializer().getKeyStatusReport(userEmail)
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error getting key status report: ${e.message}", e)
-            StartupInitializer.KeyStatusReport(
-                userEmail = userEmail,
-                cryptoManagerStatus = StartupInitializer.KeyStorageStatus(),
-                backupStatus = StartupInitializer.KeyStorageStatus(),
-                needsAttention = true,
-                timestamp = System.currentTimeMillis(),
-                error = e.message
-            )
-        }
-    }
-
-    /**
      * Clear keys that need attention flag
      */
     fun clearKeysNeedAttention(userEmail: String) {
@@ -252,15 +235,22 @@ class VoteChainApplication : Application() {
         }
     }
 
-    /**
-     * Check if keys need user attention
-     */
-    fun doKeysNeedAttention(userEmail: String): Boolean {
-        return try {
-            getStartupInitializer().doKeysNeedAttention(userEmail)
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error checking if keys need attention: ${e.message}", e)
-            true // Assume they need attention on error
-        }
+    private fun scheduleKeyHealthChecks() {
+        // Check key health every time the app starts
+        val cryptoKeyManager = CryptoKeyManager.getInstance(this)
+
+        // Perform health check in background
+        Thread {
+            try {
+                val isHealthy = cryptoKeyManager.performKeyHealthCheck()
+                Log.d("VoteChain", "Key health check result: $isHealthy")
+
+                if (!isHealthy) {
+                    Log.w("VoteChain", "Key health check failed - user may need to re-register")
+                }
+            } catch (e: Exception) {
+                Log.e("VoteChain", "Key health check error", e)
+            }
+        }.start()
     }
 }

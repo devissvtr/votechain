@@ -97,6 +97,9 @@ data class LocalizedStrings(
     val resendOtp: String,
     val verify: String,
     val verifyToVote: String,
+    val votingSuccess: String,
+    val votingSuccessDesc: String,
+    val backHome: String,
 
     // Candidate Details
     val detailCandidate: String,
@@ -313,6 +316,9 @@ private fun getIndonesianStrings(): LocalizedStrings {
         resendOtp = "Kirim Ulang OTP",
         verify = "Verifikasi",
         verifyToVote = "Verifikasi untuk Memilih",
+        votingSuccess = "Voting Berhasil Submit!",
+        votingSuccessDesc = "Terima kasih telah memberikan suara Anda. Suara Anda telah berhasil tercatat",
+        backHome = "Kembali ke Beranda",
 
         // Candidate Details
         detailCandidate = "Detail Kandidat",
@@ -520,6 +526,9 @@ private fun getEnglishStrings(): LocalizedStrings {
         resendOtp = "Resend OTP",
         verify = "Verify",
         verifyToVote = "Verify to Vote",
+        votingSuccess = "Vote Successfully Submitted!",
+        votingSuccessDesc = "Thank you for providing your vote. Your vote has been successfully recorded",
+        backHome = "Back to Home",
 
         // Candidate Details
         detailCandidate = "Detail Candidate",

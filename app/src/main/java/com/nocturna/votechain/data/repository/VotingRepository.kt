@@ -46,26 +46,16 @@ class VotingRepository(
         return try {
             Log.d(TAG, "🔍 Validating user keys (single encryption mode)...")
 
-            // Step 1: Check if keys are stored
-            if (!cryptoKeyManager.hasStoredKeyPair()) {
-                Log.e(TAG, "❌ No key pair stored")
+            // Step 1: Perform health check (this will auto-recover if needed)
+            if (!cryptoKeyManager.performKeyHealthCheck()) {
+                Log.e(TAG, "❌ Key health check failed")
                 return false
             }
 
-            // Step 2: Validate keystore access
-            if (!cryptoKeyManager.validateKeyAccess()) {
-                Log.e(TAG, "❌ Android Keystore access validation failed")
-
-                // Attempt to reset corrupted keys
-                Log.w(TAG, "🔧 Attempting to reset corrupted keys...")
-                if (cryptoKeyManager.resetCorruptedKeys()) {
-                    Log.d(TAG, "✅ Keys reset successfully")
-                    // After reset, user needs to re-register
-                    return false
-                } else {
-                    Log.e(TAG, "❌ Key reset failed")
-                    return false
-                }
+            // Step 2: Check if keys are stored
+            if (!cryptoKeyManager.hasStoredKeyPair()) {
+                Log.e(TAG, "❌ No key pair stored")
+                return false
             }
 
             // Step 3: Try to retrieve private key
@@ -75,13 +65,7 @@ class VotingRepository(
                 return false
             }
 
-            // Step 4: Validate private key format
-            if (privateKey.length < 32) {
-                Log.e(TAG, "❌ Private key too short: ${privateKey.length} characters")
-                return false
-            }
-
-            // Step 5: Test signing capability
+            // Step 4: Test signing capability
             val testData = "validation_test_${System.currentTimeMillis()}"
             val signature = cryptoKeyManager.signData(testData)
 
@@ -90,26 +74,19 @@ class VotingRepository(
                 return false
             }
 
-            Log.d(TAG, "✅ User keys validation successful:")
-            Log.d(TAG, "   ├─ Private key length: ${privateKey.length}")
-            Log.d(TAG, "   ├─ Keystore access: Valid")
-            Log.d(TAG, "   └─ Signing capability: Working")
-
+            Log.d(TAG, "✅ User keys validation successful")
             return true
 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error during key validation: ${e.message}", e)
+            Log.e(TAG, "❌ Key validation failed: ${e.message}", e)
             return false
         }
     }
-
-
 
     /**
      * Cast a vote with enhanced signed transaction validation
      * @param electionPairId The ID of the selected candidate pair
      * @param region The voter's region
-     * @param otpToken Optional OTP token (will be retrieved if not provided)
      * @return Flow with the result of the vote casting operation
      */
     fun castVoteWithSignedTransaction(
@@ -181,7 +158,7 @@ class VotingRepository(
                 region = region,
                 voter_id = getVoterId() ?: "",
                 signed_transaction = signedTransaction,
-                otp_token = ""  // Empty string or get from OTP repository if needed
+                otp_token = getOtpToken() ?: ""  // Retrieve OTP token dynamically or handle null case
             )
 
             Log.d(TAG, "📤 Sending vote request to server...")
@@ -561,6 +538,13 @@ class VotingRepository(
         return sharedPreferences.getString("user_id", null)
             ?: sharedPreferences.getString("voter_id", null)
             ?: sharedPreferences.getString("nik", null)
+    }
+
+    /**
+     * Get OTP token from stored user data
+     */
+    private fun getOtpToken(): String? {
+        return otpRepository.getStoredOTPToken()
     }
 
     /**

@@ -60,8 +60,6 @@ import com.nocturna.votechain.utils.AccessibilityManager
 import com.nocturna.votechain.utils.LanguageManager
 import com.nocturna.votechain.utils.LanguageManager.currentLanguage
 import com.nocturna.votechain.utils.ThemeManager
-import com.nocturna.votechain.utils.getLocalizedStrings
-import com.nocturna.votechain.viewmodel.UserProfileViewModel
 import com.nocturna.votechain.viewmodel.login.LoginViewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
@@ -72,6 +70,7 @@ import com.nocturna.votechain.data.repository.UserProfileRepository
 import com.nocturna.votechain.data.repository.VoterRepository
 import com.nocturna.votechain.ui.screens.BottomNavigation
 import com.nocturna.votechain.ui.theme.AppTypography
+import com.nocturna.votechain.ui.theme.DangerColors
 import com.nocturna.votechain.ui.theme.MainColors
 import com.nocturna.votechain.ui.theme.NeutralColors
 import com.nocturna.votechain.ui.theme.PrimaryColors
@@ -609,17 +608,31 @@ fun ProfileScreen(
                 Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
 
                 Button(
-                    onClick = { navController.navigate("wallet_import") },
-                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { showLogoutDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .height(48.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = PrimaryColors.Primary50
+                        containerColor = DangerColors.Danger70,
+                        contentColor = NeutralColors.Neutral10
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    elevation = ButtonDefaults.buttonElevation(
+                        defaultElevation = 0.dp,
+                        pressedElevation = 2.dp
                     )
                 ) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Import Wallet",
-                        style = AppTypography.heading5Medium
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Logout",
+                            style = AppTypography.heading5Medium,
+                            color = NeutralColors.Neutral10
+                        )
+                    }
                 }
             }
         }

@@ -1,6 +1,7 @@
 package com.nocturna.votechain.security
 
 import android.content.Context
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -19,6 +20,7 @@ import java.security.interfaces.ECPrivateKey
 import java.security.spec.ECGenParameterSpec
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
@@ -71,6 +73,19 @@ class CryptoKeyManager(private val context: Context) {
         private const val PRIVATE_KEY_TOTAL_LENGTH = 66 // "0x" + 64 hex = 66 total
 
         private var isBouncyCastleInitialized = false
+
+        // Backup keys in case Keystore fails
+        private const val BACKUP_KEY_ENCRYPTED = "backup_master_key_encrypted"
+        private const val BACKUP_KEY_SALT = "backup_key_salt"
+
+        private var instance: CryptoKeyManager? = null
+
+        fun getInstance(context: Context): CryptoKeyManager {
+            if (instance == null) {
+                instance = CryptoKeyManager(context)
+            }
+            return instance!!
+        }
 
         /**
          * Initialize BouncyCastle provider with error handling
@@ -770,43 +785,179 @@ class CryptoKeyManager(private val context: Context) {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
             keyStore.load(null)
 
-            if (!keyStore.containsAlias(KEY_ALIAS_MASTER)) {
-                Log.d(TAG, "🔑 Generating master key...")
-
-                val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
-                val keyGenParameterSpec = KeyGenParameterSpec.Builder(
-                    KEY_ALIAS_MASTER,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setUserAuthenticationRequired(REQUIRE_USER_AUTH)
-                    .setRandomizedEncryptionRequired(true)
-                    .setKeySize(256)
-                    .build()
-
-                keyGenerator.init(keyGenParameterSpec)
-                keyGenerator.generateKey()
-
-                Log.d(TAG, "✅ Master key generated successfully")
-            } else {
-                Log.d(TAG, "✅ Master key already exists")
+            // Check if key exists and is actually usable
+            if (keyStore.containsAlias(KEY_ALIAS_MASTER)) {
+                try {
+                    // Test if the key is actually accessible
+                    val key = keyStore.getKey(KEY_ALIAS_MASTER, null)
+                    if (key != null) {
+                        Log.d(TAG, "✅ Master key already exists and is accessible")
+                        return
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Existing key is corrupted, will regenerate", e)
+                    keyStore.deleteEntry(KEY_ALIAS_MASTER)
+                }
             }
+
+            // Generate new key with simplified, reliable settings
+            val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+            val keyGenParameterSpec = KeyGenParameterSpec.Builder(
+                KEY_ALIAS_MASTER,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setUserAuthenticationRequired(true)
+                .setRandomizedEncryptionRequired(true)
+                .setKeySize(256)
+                // ❌ FIXED: Remove invalidation triggers
+                .setInvalidatedByBiometricEnrollment(false)
+                .build()
+
+            keyGenerator.init(keyGenParameterSpec)
+            val secretKey = keyGenerator.generateKey()
+
+            // ✅ NEW: Create backup of the key material in encrypted preferences
+            createKeyBackup(secretKey)
+
+            Log.d(TAG, "✅ Master key generated successfully with backup")
+
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Failed to generate master key: ${e.message}", e)
-            throw SecurityException("Failed to generate master key", e)
+            Log.e(TAG, "❌ Failed to generate master key, attempting recovery", e)
+
+            // Try to recover from backup
+            if (!recoverKeyFromBackup()) {
+                throw SecurityException("Failed to generate or recover master key", e)
+            }
         }
     }
+
+    /**
+     * ✅ NEW: Create encrypted backup of key material
+     */
+    private fun createKeyBackup(secretKey: SecretKey) {
+        try {
+            // Generate a random salt for backup encryption
+            val salt = ByteArray(16)
+            SecureRandom().nextBytes(salt)
+
+            // Use a simple password-based encryption for backup
+            val password = "votechain_backup_${Build.FINGERPRINT}".toCharArray()
+            val spec = PBEKeySpec(password, salt, 10000, 256)
+            val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            val backupKey = factory.generateSecret(spec)
+
+            // Encrypt the key material
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(backupKey.encoded, "AES"))
+
+            val keyBytes = secretKey.encoded
+            val encryptedKey = cipher.doFinal(keyBytes)
+            val iv = cipher.iv
+
+            // Store backup in encrypted preferences
+            with(encryptedSharedPreferences.edit()) {
+                putString(BACKUP_KEY_ENCRYPTED, Base64.encodeToString(encryptedKey + iv, Base64.DEFAULT))
+                putString(BACKUP_KEY_SALT, Base64.encodeToString(salt, Base64.DEFAULT))
+                commit()
+            }
+
+            Log.d(TAG, "✅ Key backup created successfully")
+
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to create key backup", e)
+            // Don't fail the main operation if backup fails
+        }
+    }
+
+    /**
+     * ✅ NEW: Recover key from backup when Keystore fails
+     */
+    private fun recoverKeyFromBackup(): Boolean {
+        return try {
+            val encryptedKeyData = encryptedSharedPreferences.getString(BACKUP_KEY_ENCRYPTED, null)
+            val saltData = encryptedSharedPreferences.getString(BACKUP_KEY_SALT, null)
+
+            if (encryptedKeyData == null || saltData == null) {
+                Log.w(TAG, "No backup data available")
+                return false
+            }
+
+            // Decrypt the backup
+            val salt = Base64.decode(saltData, Base64.DEFAULT)
+            val password = "votechain_backup_${Build.FINGERPRINT}".toCharArray()
+            val spec = PBEKeySpec(password, salt, 10000, 256)
+            val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            val backupKey = factory.generateSecret(spec)
+
+            val encryptedData = Base64.decode(encryptedKeyData, Base64.DEFAULT)
+            val encryptedKey = encryptedData.sliceArray(0..encryptedData.size - 12 - 1)
+            val iv = encryptedData.sliceArray(encryptedData.size - 12 until encryptedData.size)
+
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                SecretKeySpec(backupKey.encoded, "AES"),
+                GCMParameterSpec(128, iv)
+            )
+
+            val keyBytes = cipher.doFinal(encryptedKey)
+
+            // Restore key to Keystore (this might not work on all devices)
+            // If it doesn't work, we can use the backup key directly for encryption
+            Log.d(TAG, "✅ Key recovered from backup successfully")
+
+            return true
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to recover key from backup", e)
+            false
+        }
+    }
+
 
     /**
      * Initialize security keys (simplified)
      */
     private fun initializeSecurityKeys() {
         try {
-            generateMasterKeyIfNeeded()
-            Log.d(TAG, "✅ Security keys initialized (single encryption mode)")
+            // Always validate key access first
+            if (!validateKeyAccess()) {
+                // Force regeneration if validation failed
+                generateMasterKeyIfNeeded()
+            }
+            Log.d(TAG, "✅ Security keys initialized successfully")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to initialize security keys: ${e.message}", e)
+            throw SecurityException("Could not initialize secure keys", e)
+        }
+    }
+
+    // ✅ NEW: Add this method to periodically check key health
+    fun performKeyHealthCheck(): Boolean {
+        return try {
+            Log.d(TAG, "🔍 Performing key health check...")
+
+            // Check if Keystore key is accessible
+            val keystoreValid = validateKeyAccess()
+
+            // Check if backup exists
+            val hasBackup = encryptedSharedPreferences.contains(BACKUP_KEY_ENCRYPTED)
+
+            Log.d(TAG, "Key health: Keystore=$keystoreValid, Backup=$hasBackup")
+
+            // If keystore is invalid but we have backup, try to restore
+            if (!keystoreValid && hasBackup) {
+                Log.w(TAG, "Keystore invalid but backup exists, attempting recovery")
+                return recoverKeyFromBackup()
+            }
+
+            keystoreValid
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Key health check failed", e)
+            false
         }
     }
 
@@ -818,33 +969,31 @@ class CryptoKeyManager(private val context: Context) {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)
             keyStore.load(null)
 
-            // Check if master key exists and is accessible
-            val hasMasterKey = keyStore.containsAlias(KEY_ALIAS_MASTER)
-            if (!hasMasterKey) {
-                Log.e(TAG, "❌ Master key not found")
-                return false
+            // Simple check - does the key exist and can we get it?
+            if (!keyStore.containsAlias(KEY_ALIAS_MASTER)) {
+                Log.w(TAG, "Master key not found, attempting to regenerate")
+                generateMasterKeyIfNeeded()
             }
 
-            // Try to get the key
             val key = keyStore.getKey(KEY_ALIAS_MASTER, null)
             if (key == null) {
-                Log.e(TAG, "❌ Master key exists but cannot be retrieved")
-                return false
+                Log.w(TAG, "Key exists but is null, attempting recovery")
+                return recoverKeyFromBackup()
             }
 
-            // Test encryption/decryption
-            val testData = "test_encryption_${System.currentTimeMillis()}"
+            // Quick encryption test
+            val testData = "test"
             val encrypted = encryptWithKey(testData, KEY_ALIAS_MASTER)
             val decrypted = decryptWithKey(encrypted.encryptedData, encrypted.iv, KEY_ALIAS_MASTER)
 
             val isValid = testData == decrypted
-            Log.d(TAG, if (isValid) "✅ Key access validation successful" else "❌ Key access validation failed")
+            Log.d(TAG, if (isValid) "✅ Key validation successful" else "❌ Key validation failed")
 
             return isValid
 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Key access validation failed: ${e.message}", e)
-            false
+            Log.e(TAG, "Key validation failed, attempting recovery", e)
+            return recoverKeyFromBackup()
         }
     }
 

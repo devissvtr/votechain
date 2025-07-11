@@ -53,7 +53,7 @@ class VoteConfirmationViewModel(
             // Update UI to show transaction generation step
             _uiState.value = _uiState.value.copy(step = VoteStep.GENERATING_TRANSACTION)
 
-            votingRepository.castVoteWithSignedTransaction(electionPairId, region, otpToken)
+            votingRepository.castVoteWithSignedTransaction(electionPairId, region)
                 .collect { result ->
                     result.fold(
                         onSuccess = { voteResponse ->
