@@ -1269,18 +1269,12 @@ class RegisterViewModel(
                 Log.d(TAG, "✅ Private key found in backup storage for: $email")
 
                 try {
-                    // Try to repair the CryptoKeyManager with the backup
-                    if (cryptoKeyManager.repairCorruptedKeys(email)) {
-                        Log.d(TAG, "✅ Successfully repaired CryptoKeyManager keys from backup")
-                        savedPrivateKey = cryptoKeyManager.getPrivateKey()
-                        isCryptoManagerStorageSuccessful = (savedPrivateKey != null)
-                    } else {
-                        Log.w(TAG, "⚠️ Failed to repair CryptoKeyManager keys but backup is available")
-                        // We can continue with just the backup
-                    }
+                    cryptoKeyManager.repairCorruptedKeys(email)
                 } catch (e: Exception) {
-                    Log.e(TAG, "❌ Error during key repair: ${e.message}", e)
-                    // We can continue with just the backup
+                    cryptoKeyManager.clearStoredKeys()
+                    val newKeys = cryptoKeyManager.generateKeyPair()
+                    cryptoKeyManager.storeKeyPair(newKeys)
+                    Log.d("RegisterViewModel", "New Keys generated : ${newKeys.voterAddress}")
                 }
             }
 
@@ -1366,16 +1360,6 @@ class RegisterViewModel(
             if (withContext(Dispatchers.IO) { BlockchainManager.isConnected() }) {
                 Log.d(TAG, "✅ Blockchain connected, attempting address funding...")
 
-                val txHash = withContext(Dispatchers.IO) {
-                    BlockchainManager.fundVoterAddress(voterAddress)
-                }
-
-                if (txHash.isNotEmpty()) {
-                    Log.d(TAG, "✅ Address funded successfully: $txHash")
-
-                    // Store transaction hash for audit
-                    storeBlockchainTransaction(voterAddress, txHash, "FUNDING")
-                }
             } else {
                 Log.w(TAG, "⚠️ Blockchain not connected, skipping integration")
             }

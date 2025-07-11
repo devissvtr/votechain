@@ -1,43 +1,45 @@
 package com.nocturna.votechain.blockchain
 
 import android.util.Log
-import com.nocturna.votechain.blockchain.BlockchainManager.getCurrentGasPrice
-import com.nocturna.votechain.blockchain.BlockchainManager.isConnected
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import org.web3j.abi.FunctionEncoder
+import org.web3j.abi.TypeReference
+import org.web3j.abi.datatypes.Function
+import org.web3j.abi.datatypes.Type
+import org.web3j.abi.datatypes.Utf8String
+import org.web3j.abi.datatypes.Address
+import org.web3j.abi.datatypes.Bool
+import org.web3j.abi.datatypes.generated.Uint256
 import org.web3j.crypto.Credentials
-import org.web3j.crypto.ECKeyPair
-import org.web3j.crypto.Keys
 import org.web3j.crypto.RawTransaction
 import org.web3j.crypto.TransactionEncoder
 import org.web3j.protocol.Web3j
-import org.web3j.protocol.core.DefaultBlockParameter
 import org.web3j.protocol.core.DefaultBlockParameterName
-import org.web3j.protocol.core.methods.response.EthBlock
+import org.web3j.protocol.core.methods.request.Transaction
+import org.web3j.protocol.core.methods.response.EthSendTransaction
+import org.web3j.protocol.core.methods.response.TransactionReceipt
 import org.web3j.protocol.http.HttpService
 import org.web3j.utils.Convert
 import org.web3j.utils.Numeric
-import java.math.BigDecimal
 import java.math.BigInteger
-import java.security.SecureRandom
-import kotlin.text.toLong
+import java.util.concurrent.CompletableFuture
 
 /**
- * Singleton to manage Web3j connections and blockchain operations
+ * Enhanced BlockchainManager with proper contract interaction support
  */
 object BlockchainManager {
     private const val TAG = "BlockchainManager"
 
     private val web3j: Web3j by lazy {
-        val nodeUrl = "https://799d-36-79-168-77.ngrok-free.app"
+        val nodeUrl = BlockchainConfig.getCurrentNetwork().rpcUrl
         Log.d(TAG, "Initializing Web3j connection to $nodeUrl")
         Web3j.build(HttpService(nodeUrl))
     }
 
     /**
-     * Check if Web3j is connected to the Ethereum node
-     * @return true if connected, false otherwise
+     * Check if Web3j is connected to the blockchain node
      */
     suspend fun isConnected(): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -45,75 +47,597 @@ object BlockchainManager {
             Log.d(TAG, "Node client version: ${clientVersion.web3ClientVersion}")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Error connecting to Ethereum node: ${e.message}", e)
+            Log.e(TAG, "Error connecting to blockchain node: ${e.message}", e)
             false
         }
     }
 
     /**
-     * Generate a new Ethereum address
-     * @return The generated address with 0x prefix
-     */
-    fun generateAddress(): String {
-        try {
-            // Generate random private key
-            val privateKeyBytes = ByteArray(32)
-            SecureRandom().nextBytes(privateKeyBytes)
-
-            // Create ECKeyPair from private key
-            val privateKey = Numeric.toBigInt(privateKeyBytes)
-            val keyPair = ECKeyPair.create(privateKey)
-
-            // Get Ethereum address from key pair
-            val address = Keys.toChecksumAddress("0x" + Keys.getAddress(keyPair))
-            Log.d(TAG, "Generated new Ethereum address: $address")
-            return address
-        } catch (e: Exception) {
-            Log.e(TAG, "Error generating Ethereum address: ${e.message}", e)
-            // Return a placeholder in case of error
-            return "0x0000000000000000000000000000000000000000"
-        }
-    }
-
-    /**
-     * Get account balance from the blockchain
-     * @param address Ethereum address to check
-     * @return Balance in ETH as a string with 8 decimal places
+     * Get account balance in ETH
      */
     suspend fun getAccountBalance(address: String): String = withContext(Dispatchers.IO) {
         try {
             val balanceWei = web3j.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().balance
             val balanceEth = Convert.fromWei(balanceWei.toString(), Convert.Unit.ETHER)
-
-            // Format to 8 decimal places
-            return@withContext String.format("%.8f", balanceEth.toDouble())
+            String.format("%.6f", balanceEth.toDouble())
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching balance for $address: ${e.message}", e)
-            return@withContext "0.00000000"
+            "0.000000"
         }
     }
 
     /**
-     * Fund a newly created voter address with a small amount of ETH
-     * Note: This requires an account with funds on the local node
-     * @param voterAddress Address to fund
-     * @return Transaction hash if successful, empty string if failed
+     * Get current gas price
      */
-    suspend fun fundVoterAddress(voterAddress: String,
-                                 amount: String = "0.001"
-    ): String = withContext(Dispatchers.IO) {
+    suspend fun getCurrentGasPrice(): BigInteger = withContext(Dispatchers.IO) {
         try {
-            Log.d(TAG, "🔗 Attempting to fund voter address: $voterAddress with $amount ETH")
+            val gasPrice = web3j.ethGasPrice().send().gasPrice
+            Log.d(TAG, "Current gas price: $gasPrice wei")
+            gasPrice
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get gas price, using default: ${e.message}")
+            BigInteger.valueOf(BlockchainConfig.Gas.GAS_PRICE_WEI)
+        }
+    }
 
-            // Check if we have a funding account configured
-            val fundingAccount = getFundingAccount()
-            if (fundingAccount == null) {
-                Log.w(TAG, "⚠️ No funding account configured, skipping funding")
-                return@withContext ""
+    /**
+     * Get nonce for address
+     */
+    suspend fun getNonce(address: String): BigInteger = withContext(Dispatchers.IO) {
+        try {
+            web3j.ethGetTransactionCount(address, DefaultBlockParameterName.LATEST).send().transactionCount
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting nonce for $address: ${e.message}", e)
+            BigInteger.ZERO
+        }
+    }
+
+    /**
+     * Cast vote on blockchain
+     */
+    suspend fun castVote(
+        privateKey: String,
+        electionId: String,
+        electionNo: String
+    ): VoteResult = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "🗳️ Casting vote on blockchain")
+            Log.d(TAG, "- Election ID: $electionId")
+            Log.d(TAG, "- Election No: $electionNo")
+
+            val credentials = Credentials.create(privateKey)
+            val fromAddress = credentials.address
+
+            // Create function for vote call
+            val function = Function(
+                BlockchainConfig.ContractMethods.VOTE,
+                listOf(
+                    Utf8String(electionId),
+                    Utf8String(electionNo)
+                ),
+                emptyList()
+            )
+
+            val encodedFunction = FunctionEncoder.encode(function)
+            val contractAddress = BlockchainConfig.getCurrentNetwork().voteChainAddress
+
+            // Get gas price and nonce
+            val gasPrice = getCurrentGasPrice()
+            val nonce = getNonce(fromAddress)
+
+            // Create raw transaction
+            val rawTransaction = RawTransaction.createTransaction(
+                nonce,
+                gasPrice,
+                BigInteger.valueOf(BlockchainConfig.Gas.VOTE_GAS_LIMIT),
+                contractAddress,
+                encodedFunction
+            )
+
+            // Sign and send transaction
+            val signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials)
+            val hexValue = Numeric.toHexString(signedMessage)
+
+            val ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send()
+
+            if (ethSendTransaction.hasError()) {
+                Log.e(TAG, "❌ Vote transaction failed: ${ethSendTransaction.error.message}")
+                VoteResult.Error(ethSendTransaction.error.message)
+            } else {
+                val txHash = ethSendTransaction.transactionHash
+                Log.d(TAG, "✅ Vote transaction sent: $txHash")
+
+                // Wait for transaction confirmation
+                val receipt = waitForTransactionReceipt(txHash)
+                if (receipt != null) {
+                    Log.d(TAG, "✅ Vote transaction confirmed: $txHash")
+                    VoteResult.Success(txHash, receipt.gasUsed.toString())
+                } else {
+                    Log.w(TAG, "⚠️ Vote transaction timeout: $txHash")
+                    VoteResult.Pending(txHash)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error casting vote: ${e.message}", e)
+            VoteResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Register voter on blockchain
+     */
+    suspend fun registerVoter(
+        privateKey: String,
+        nik: String,
+        voterAddress: String
+    ): TransactionResult = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "📝 Registering voter on blockchain")
+            Log.d(TAG, "- NIK: $nik")
+            Log.d(TAG, "- Voter Address: $voterAddress")
+
+            val credentials = Credentials.create(privateKey)
+            val fromAddress = credentials.address
+
+            // Create function for registerVoter call
+            val function = Function(
+                BlockchainConfig.ContractMethods.REGISTER_VOTER,
+                listOf(
+                    Utf8String(nik),
+                    Address(voterAddress)
+                ),
+                emptyList()
+            )
+
+            val encodedFunction = FunctionEncoder.encode(function)
+            val contractAddress = BlockchainConfig.getCurrentNetwork().voterManagerAddress
+
+            // Get gas price and nonce
+            val gasPrice = getCurrentGasPrice()
+            val nonce = getNonce(fromAddress)
+
+            // Create raw transaction
+            val rawTransaction = RawTransaction.createTransaction(
+                nonce,
+                gasPrice,
+                BigInteger.valueOf(BlockchainConfig.Gas.REGISTER_VOTER_GAS_LIMIT),
+                contractAddress,
+                encodedFunction
+            )
+
+            // Sign and send transaction
+            val signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials)
+            val hexValue = Numeric.toHexString(signedMessage)
+
+            val ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send()
+
+            if (ethSendTransaction.hasError()) {
+                Log.e(TAG, "❌ Voter registration failed: ${ethSendTransaction.error.message}")
+                TransactionResult.Error(ethSendTransaction.error.message)
+            } else {
+                val txHash = ethSendTransaction.transactionHash
+                Log.d(TAG, "✅ Voter registration sent: $txHash")
+
+                // Wait for transaction confirmation
+                val receipt = waitForTransactionReceipt(txHash)
+                if (receipt != null) {
+                    Log.d(TAG, "✅ Voter registration confirmed: $txHash")
+                    TransactionResult.Success(txHash, receipt.gasUsed.toString())
+                } else {
+                    Log.w(TAG, "⚠️ Voter registration timeout: $txHash")
+                    TransactionResult.Pending(txHash)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error registering voter: ${e.message}", e)
+            TransactionResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Add election to blockchain
+     */
+    suspend fun addElection(
+        privateKey: String,
+        electionId: String,
+        electionNo: String
+    ): TransactionResult = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "🗳️ Adding election to blockchain")
+            Log.d(TAG, "- Election ID: $electionId")
+            Log.d(TAG, "- Election No: $electionNo")
+
+            val credentials = Credentials.create(privateKey)
+            val fromAddress = credentials.address
+
+            // Create function for addElection call
+            val function = Function(
+                BlockchainConfig.ContractMethods.ADD_ELECTION,
+                listOf(
+                    Utf8String(electionId),
+                    Utf8String(electionNo)
+                ),
+                emptyList()
+            )
+
+            val encodedFunction = FunctionEncoder.encode(function)
+            val contractAddress = BlockchainConfig.getCurrentNetwork().voteChainAddress
+
+            // Get gas price and nonce
+            val gasPrice = getCurrentGasPrice()
+            val nonce = getNonce(fromAddress)
+
+            // Create raw transaction
+            val rawTransaction = RawTransaction.createTransaction(
+                nonce,
+                gasPrice,
+                BigInteger.valueOf(BlockchainConfig.Gas.DEFAULT_GAS_LIMIT),
+                contractAddress,
+                encodedFunction
+            )
+
+            // Sign and send transaction
+            val signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials)
+            val hexValue = Numeric.toHexString(signedMessage)
+
+            val ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send()
+
+            if (ethSendTransaction.hasError()) {
+                Log.e(TAG, "❌ Add election failed: ${ethSendTransaction.error.message}")
+                TransactionResult.Error(ethSendTransaction.error.message)
+            } else {
+                val txHash = ethSendTransaction.transactionHash
+                Log.d(TAG, "✅ Add election sent: $txHash")
+
+                // Wait for transaction confirmation
+                val receipt = waitForTransactionReceipt(txHash)
+                if (receipt != null) {
+                    Log.d(TAG, "✅ Add election confirmed: $txHash")
+                    TransactionResult.Success(txHash, receipt.gasUsed.toString())
+                } else {
+                    Log.w(TAG, "⚠️ Add election timeout: $txHash")
+                    TransactionResult.Pending(txHash)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error adding election: ${e.message}", e)
+            TransactionResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Toggle election active status
+     */
+    suspend fun toggleElectionActive(
+        privateKey: String,
+        electionId: String,
+        electionNo: String
+    ): TransactionResult = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "🔄 Toggling election active status")
+            Log.d(TAG, "- Election ID: $electionId")
+            Log.d(TAG, "- Election No: $electionNo")
+
+            val credentials = Credentials.create(privateKey)
+            val fromAddress = credentials.address
+
+            // Create function for toggleElectionActive call
+            val function = Function(
+                BlockchainConfig.ContractMethods.TOGGLE_ELECTION_ACTIVE,
+                listOf(
+                    Utf8String(electionId),
+                    Utf8String(electionNo)
+                ),
+                emptyList()
+            )
+
+            val encodedFunction = FunctionEncoder.encode(function)
+            val contractAddress = BlockchainConfig.getCurrentNetwork().electionManagerAddress
+
+            // Get gas price and nonce
+            val gasPrice = getCurrentGasPrice()
+            val nonce = getNonce(fromAddress)
+
+            // Create raw transaction
+            val rawTransaction = RawTransaction.createTransaction(
+                nonce,
+                gasPrice,
+                BigInteger.valueOf(BlockchainConfig.Gas.DEFAULT_GAS_LIMIT),
+                contractAddress,
+                encodedFunction
+            )
+
+            // Sign and send transaction
+            val signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials)
+            val hexValue = Numeric.toHexString(signedMessage)
+
+            val ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send()
+
+            if (ethSendTransaction.hasError()) {
+                Log.e(TAG, "❌ Toggle election failed: ${ethSendTransaction.error.message}")
+                TransactionResult.Error(ethSendTransaction.error.message)
+            } else {
+                val txHash = ethSendTransaction.transactionHash
+                Log.d(TAG, "✅ Toggle election sent: $txHash")
+
+                // Wait for transaction confirmation
+                val receipt = waitForTransactionReceipt(txHash)
+                if (receipt != null) {
+                    Log.d(TAG, "✅ Toggle election confirmed: $txHash")
+                    TransactionResult.Success(txHash, receipt.gasUsed.toString())
+                } else {
+                    Log.w(TAG, "⚠️ Toggle election timeout: $txHash")
+                    TransactionResult.Pending(txHash)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error toggling election: ${e.message}", e)
+            TransactionResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Set voting status (activate/deactivate voting)
+     */
+    suspend fun setVotingStatus(
+        privateKey: String,
+        status: Boolean
+    ): TransactionResult = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "⚙️ Setting voting status to: $status")
+
+            val credentials = Credentials.create(privateKey)
+            val fromAddress = credentials.address
+
+            // Create function for setVotingStatus call
+            val function = Function(
+                BlockchainConfig.ContractMethods.SET_VOTING_STATUS,
+                listOf(Bool(status)),
+                emptyList()
+            )
+
+            val encodedFunction = FunctionEncoder.encode(function)
+            val contractAddress = BlockchainConfig.getCurrentNetwork().voteChainBaseAddress
+
+            // Get gas price and nonce
+            val gasPrice = getCurrentGasPrice()
+            val nonce = getNonce(fromAddress)
+
+            // Create raw transaction
+            val rawTransaction = RawTransaction.createTransaction(
+                nonce,
+                gasPrice,
+                BigInteger.valueOf(BlockchainConfig.Gas.DEFAULT_GAS_LIMIT),
+                contractAddress,
+                encodedFunction
+            )
+
+            // Sign and send transaction
+            val signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials)
+            val hexValue = Numeric.toHexString(signedMessage)
+
+            val ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send()
+
+            if (ethSendTransaction.hasError()) {
+                Log.e(TAG, "❌ Set voting status failed: ${ethSendTransaction.error.message}")
+                TransactionResult.Error(ethSendTransaction.error.message)
+            } else {
+                val txHash = ethSendTransaction.transactionHash
+                Log.d(TAG, "✅ Set voting status sent: $txHash")
+
+                // Wait for transaction confirmation
+                val receipt = waitForTransactionReceipt(txHash)
+                if (receipt != null) {
+                    Log.d(TAG, "✅ Set voting status confirmed: $txHash")
+                    TransactionResult.Success(txHash, receipt.gasUsed.toString())
+                } else {
+                    Log.w(TAG, "⚠️ Set voting status timeout: $txHash")
+                    TransactionResult.Pending(txHash)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error setting voting status: ${e.message}", e)
+            TransactionResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Register KPU Provinsi
+     */
+    suspend fun registerKPUProvinsi(
+        privateKey: String,
+        address: String,
+        name: String,
+        region: String
+    ): TransactionResult = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "🏛️ Registering KPU Provinsi")
+            Log.d(TAG, "- Address: $address")
+            Log.d(TAG, "- Name: $name")
+            Log.d(TAG, "- Region: $region")
+
+            val credentials = Credentials.create(privateKey)
+            val fromAddress = credentials.address
+
+            // Create function for registerKPUProvinsi call
+            val function = Function(
+                BlockchainConfig.ContractMethods.REGISTER_KPU_PROVINSI,
+                listOf(
+                    Address(address),
+                    Utf8String(name),
+                    Utf8String(region)
+                ),
+                emptyList()
+            )
+
+            val encodedFunction = FunctionEncoder.encode(function)
+            val contractAddress = BlockchainConfig.getCurrentNetwork().kpuManagerAddress
+
+            // Get gas price and nonce
+            val gasPrice = getCurrentGasPrice()
+            val nonce = getNonce(fromAddress)
+
+            // Create raw transaction
+            val rawTransaction = RawTransaction.createTransaction(
+                nonce,
+                gasPrice,
+                BigInteger.valueOf(BlockchainConfig.Gas.REGISTER_KPU_GAS_LIMIT),
+                contractAddress,
+                encodedFunction
+            )
+
+            // Sign and send transaction
+            val signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials)
+            val hexValue = Numeric.toHexString(signedMessage)
+
+            val ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send()
+
+            if (ethSendTransaction.hasError()) {
+                Log.e(TAG, "❌ Register KPU Provinsi failed: ${ethSendTransaction.error.message}")
+                TransactionResult.Error(ethSendTransaction.error.message)
+            } else {
+                val txHash = ethSendTransaction.transactionHash
+                Log.d(TAG, "✅ Register KPU Provinsi sent: $txHash")
+
+                // Wait for transaction confirmation
+                val receipt = waitForTransactionReceipt(txHash)
+                if (receipt != null) {
+                    Log.d(TAG, "✅ Register KPU Provinsi confirmed: $txHash")
+                    TransactionResult.Success(txHash, receipt.gasUsed.toString())
+                } else {
+                    Log.w(TAG, "⚠️ Register KPU Provinsi timeout: $txHash")
+                    TransactionResult.Pending(txHash)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error registering KPU Provinsi: ${e.message}", e)
+            TransactionResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Register KPU Kota
+     */
+    suspend fun registerKPUKota(
+        privateKey: String,
+        address: String,
+        name: String,
+        region: String
+    ): TransactionResult = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "🏛️ Registering KPU Kota")
+            Log.d(TAG, "- Address: $address")
+            Log.d(TAG, "- Name: $name")
+            Log.d(TAG, "- Region: $region")
+
+            val credentials = Credentials.create(privateKey)
+            val fromAddress = credentials.address
+
+            // Create function for registerKPUKota call
+            val function = Function(
+                BlockchainConfig.ContractMethods.REGISTER_KPU_KOTA,
+                listOf(
+                    Address(address),
+                    Utf8String(name),
+                    Utf8String(region)
+                ),
+                emptyList()
+            )
+
+            val encodedFunction = FunctionEncoder.encode(function)
+            val contractAddress = BlockchainConfig.getCurrentNetwork().kpuManagerAddress
+
+            // Get gas price and nonce
+            val gasPrice = getCurrentGasPrice()
+            val nonce = getNonce(fromAddress)
+
+            // Create raw transaction
+            val rawTransaction = RawTransaction.createTransaction(
+                nonce,
+                gasPrice,
+                BigInteger.valueOf(BlockchainConfig.Gas.REGISTER_KPU_GAS_LIMIT),
+                contractAddress,
+                encodedFunction
+            )
+
+            // Sign and send transaction
+            val signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials)
+            val hexValue = Numeric.toHexString(signedMessage)
+
+            val ethSendTransaction = web3j.ethSendRawTransaction(hexValue).send()
+
+            if (ethSendTransaction.hasError()) {
+                Log.e(TAG, "❌ Register KPU Kota failed: ${ethSendTransaction.error.message}")
+                TransactionResult.Error(ethSendTransaction.error.message)
+            } else {
+                val txHash = ethSendTransaction.transactionHash
+                Log.d(TAG, "✅ Register KPU Kota sent: $txHash")
+
+                // Wait for transaction confirmation
+                val receipt = waitForTransactionReceipt(txHash)
+                if (receipt != null) {
+                    Log.d(TAG, "✅ Register KPU Kota confirmed: $txHash")
+                    TransactionResult.Success(txHash, receipt.gasUsed.toString())
+                } else {
+                    Log.w(TAG, "⚠️ Register KPU Kota timeout: $txHash")
+                    TransactionResult.Pending(txHash)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error registering KPU Kota: ${e.message}", e)
+            TransactionResult.Error(e.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Check if voting is active
+     */
+    suspend fun isVotingActive(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val function = Function(
+                BlockchainConfig.ContractMethods.VOTING_ACTIVE,
+                emptyList(),
+                listOf(object : TypeReference<Bool>() {})
+            )
+
+            val encodedFunction = FunctionEncoder.encode(function)
+            val contractAddress = BlockchainConfig.getCurrentNetwork().voteChainBaseAddress
+
+            val response = web3j.ethCall(
+                Transaction.createEthCallTransaction(null, contractAddress, encodedFunction),
+                DefaultBlockParameterName.LATEST
+            ).send()
+
+            if (response.hasError()) {
+                Log.e(TAG, "Error checking voting status: ${response.error.message}")
+                return@withContext false
             }
 
+            // Parse the response - this is a simplified parsing
+            val result = response.value
+            result != "0x0000000000000000000000000000000000000000000000000000000000000000"
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking voting active status: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Fund voter address with small amount of ETH for gas
+     */
+    suspend fun fundVoterAddress(
+        fundingPrivateKey: String,
+        voterAddress: String,
+        amount: String = "0.001"
+    ): String = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "💰 Funding voter address: $voterAddress with $amount ETH")
+
+            val credentials = Credentials.create(fundingPrivateKey)
+            val fromAddress = credentials.address
+
             // Check funding account balance
-            val fundingBalance = getAccountBalance(fundingAccount.address)
+            val fundingBalance = getAccountBalance(fromAddress)
             val fundingBalanceEth = fundingBalance.toDoubleOrNull() ?: 0.0
             val requiredAmount = amount.toDoubleOrNull() ?: 0.001
 
@@ -122,13 +646,10 @@ object BlockchainManager {
                 return@withContext ""
             }
 
-            // Create and send transaction
+            // Create ETH transfer transaction
             val amountWei = Convert.toWei(amount, Convert.Unit.ETHER).toBigInteger()
-            val gasPrice = web3j.ethGasPrice().send().gasPrice
-            val nonce = web3j.ethGetTransactionCount(
-                fundingAccount.address,
-                DefaultBlockParameterName.LATEST
-            ).send().transactionCount
+            val gasPrice = getCurrentGasPrice()
+            val nonce = getNonce(fromAddress)
 
             val transaction = RawTransaction.createEtherTransaction(
                 nonce,
@@ -138,7 +659,7 @@ object BlockchainManager {
                 amountWei
             )
 
-            val signedTransaction = TransactionEncoder.signMessage(transaction, fundingAccount.credentials)
+            val signedTransaction = TransactionEncoder.signMessage(transaction, credentials)
             val transactionHash = web3j.ethSendRawTransaction(
                 Numeric.toHexString(signedTransaction)
             ).send().transactionHash
@@ -146,7 +667,7 @@ object BlockchainManager {
             if (transactionHash.isNotEmpty()) {
                 Log.d(TAG, "✅ Funding transaction sent: $transactionHash")
 
-                // Wait for transaction confirmation (optional)
+                // Wait for transaction confirmation
                 waitForTransactionConfirmation(transactionHash)
 
                 return@withContext transactionHash
@@ -162,73 +683,29 @@ object BlockchainManager {
     }
 
     /**
-     * Register voter on smart contract (if applicable)
+     * Wait for transaction receipt
      */
-    suspend fun registerVoterOnContract(voterAddress: String): String = withContext(Dispatchers.IO) {
-        try {
-            Log.d(TAG, "📝 Registering voter on smart contract: $voterAddress")
+    private suspend fun waitForTransactionReceipt(
+        transactionHash: String,
+        maxWaitTime: Int = BlockchainConfig.Transaction.TIMEOUT_SECONDS * 1000
+    ): TransactionReceipt? = withContext(Dispatchers.IO) {
+        val startTime = System.currentTimeMillis()
 
-            // This is a placeholder implementation
-            // Replace with your actual smart contract interaction
-            val contractAddress = getVotingContractAddress()
-            if (contractAddress.isEmpty()) {
-                Log.w(TAG, "⚠️ No voting contract configured")
-                return@withContext ""
+        while (System.currentTimeMillis() - startTime < maxWaitTime) {
+            try {
+                val receipt = web3j.ethGetTransactionReceipt(transactionHash).send()
+                if (receipt.transactionReceipt.isPresent) {
+                    return@withContext receipt.transactionReceipt.get()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error checking transaction receipt: ${e.message}")
             }
 
-            // Simulate contract registration
-            // In a real implementation, you would:
-            // 1. Load your voting contract
-            // 2. Call the register voter function
-            // 3. Return the transaction hash
-
-            delay(1000) // Simulate network delay
-            val mockTxHash = "0x" + generateMockTransactionHash()
-
-            Log.d(TAG, "✅ Voter registration transaction: $mockTxHash")
-            return@withContext mockTxHash
-
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error registering voter on contract: ${e.message}", e)
-            return@withContext ""
+            delay(BlockchainConfig.Transaction.POLLING_INTERVAL_MS)
         }
-    }
 
-    /**
-     * Get gas price with fallback
-     */
-    suspend fun getCurrentGasPrice(): BigInteger = withContext(Dispatchers.IO) {
-        try {
-            val gasPrice = web3j.ethGasPrice().send().gasPrice
-            Log.d(TAG, "Current gas price: $gasPrice wei")
-            return@withContext gasPrice
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get gas price, using default: ${e.message}")
-            return@withContext Convert.toWei("20", Convert.Unit.GWEI).toBigInteger()
-        }
-    }
-
-    /**
-     * Estimate gas for transaction
-     */
-    suspend fun estimateGas(
-        from: String,
-        to: String,
-        value: BigInteger = BigInteger.ZERO,
-        data: String = ""
-    ): BigInteger = withContext(Dispatchers.IO) {
-        try {
-            val transaction = org.web3j.protocol.core.methods.request.Transaction.createEthCallTransaction(
-                from, to, data
-            )
-
-            val gasEstimate = web3j.ethEstimateGas(transaction).send().amountUsed
-            Log.d(TAG, "Estimated gas: $gasEstimate")
-            return@withContext gasEstimate
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to estimate gas, using default: ${e.message}")
-            return@withContext BigInteger.valueOf(21000)
-        }
+        Log.w(TAG, "Transaction receipt timeout for: $transactionHash")
+        return@withContext null
     }
 
     /**
@@ -261,121 +738,25 @@ object BlockchainManager {
     }
 
     /**
-     * Get funding account (configure this based on your setup)
+     * Get transaction status
      */
-    private fun getFundingAccount(): FundingAccount? {
-        return try {
-            // This should be configured based on your environment
-            // For development: use a test account with test ETH
-            // For production: use a treasury account with proper security
-
-            val privateKey = "YOUR_FUNDING_ACCOUNT_PRIVATE_KEY" // Configure this
-            val credentials = Credentials.create(privateKey)
-
-            FundingAccount(
-                address = credentials.address,
-                credentials = credentials
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading funding account: ${e.message}")
-            null
-        }
-    }
-
-    /**
-     * Get voting contract address (configure this based on your setup)
-     */
-    private fun getVotingContractAddress(): String {
-        // Configure this based on your deployed contract
-        return "0x742d35Cc6634C0532925a3b8D098d64f35f5b3f6" // Example address
-    }
-
-    /**
-     * Generate mock transaction hash for testing
-     */
-    private fun generateMockTransactionHash(): String {
-        val chars = "0123456789abcdef"
-        return (1..64).map { chars.random() }.joinToString("")
-    }
-
-    /**
-     * Check if address has sufficient balance for transaction
-     */
-    suspend fun hasSufficientBalance(
-        address: String,
-        requiredAmount: String,
-        includeGas: Boolean = true
-    ): Boolean = withContext(Dispatchers.IO) {
+    suspend fun getTransactionStatus(transactionHash: String): TransactionStatus = withContext(Dispatchers.IO) {
         try {
-            val balance = getAccountBalance(address).toDoubleOrNull() ?: 0.0
-            val required = requiredAmount.toDoubleOrNull() ?: 0.0
-
-            val gasEstimate = if (includeGas) {
-                val gasPrice = getCurrentGasPrice()
-                val gasLimit = BigInteger.valueOf(21000)
-                val gasCost = gasPrice.multiply(gasLimit)
-                Convert.fromWei(gasCost.toString(), Convert.Unit.ETHER).toDouble()
-            } else {
-                0.0
-            }
-
-            val totalRequired = required + gasEstimate
-            return@withContext balance >= totalRequired
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking balance: ${e.message}")
-            return@withContext false
-        }
-    }
-
-    /**
-     * Get transaction history for address (basic implementation)
-     */
-    suspend fun getTransactionHistory(
-        address: String,
-        fromBlock: String = "earliest",
-        toBlock: String = "latest"
-    ): List<TransactionInfo> = withContext(Dispatchers.IO) {
-        try {
-            val transactions = mutableListOf<TransactionInfo>()
-
-            // Get latest blocks and check for transactions
-            val latestBlock = web3j.ethBlockNumber().send().blockNumber
-            val startBlock = maxOf(latestBlock.subtract(BigInteger.valueOf(1000)), BigInteger.ZERO)
-
-            for (blockNumber in startBlock.toLong()..latestBlock.toLong()) {
-                try {
-                    val block = web3j.ethGetBlockByNumber(
-                        DefaultBlockParameter.valueOf(BigInteger.valueOf(blockNumber)),
-                        true
-                    ).send().block
-
-                    block.transactions.forEach { tx ->
-                        val transaction = tx as? EthBlock.TransactionObject
-                        if (transaction?.to?.equals(address, ignoreCase = true) == true ||
-                            transaction?.from?.equals(address, ignoreCase = true) == true) {
-
-                            transactions.add(
-                                TransactionInfo(
-                                    hash = transaction.hash,
-                                    from = transaction.from,
-                                    to = transaction.to ?: "",
-                                    value = Convert.fromWei(transaction.value.toString(), Convert.Unit.ETHER).toString(),
-                                    blockNumber = transaction.blockNumber.toLong(),
-                                    timestamp = System.currentTimeMillis() // Approximate
-                                )
-                            )
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Continue with next block if one fails
-                    continue
+            val receipt = web3j.ethGetTransactionReceipt(transactionHash).send()
+            if (receipt.transactionReceipt.isPresent) {
+                val txReceipt = receipt.transactionReceipt.get()
+                val success = txReceipt.status == "0x1"
+                return@withContext if (success) {
+                    TransactionStatus.Confirmed(txReceipt.gasUsed.toString())
+                } else {
+                    TransactionStatus.Failed("Transaction failed")
                 }
+            } else {
+                return@withContext TransactionStatus.Pending
             }
-
-            return@withContext transactions.take(50) // Limit to 50 recent transactions
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting transaction history: ${e.message}")
-            return@withContext emptyList()
+            Log.e(TAG, "Error getting transaction status: ${e.message}", e)
+            return@withContext TransactionStatus.Unknown
         }
     }
 
@@ -400,85 +781,26 @@ object BlockchainManager {
         Log.e(TAG, "❌ All connection attempts failed")
         return@withContext false
     }
-
-    /**
-     * Get account balance with retry mechanism and better error handling
-     */
-    suspend fun getAccountBalanceWithRetry(
-        address: String,
-        maxRetries: Int = 3
-    ): String = withContext(Dispatchers.IO) {
-        repeat(maxRetries) { attempt ->
-            try {
-                val balanceWei = web3j.ethGetBalance(address, DefaultBlockParameterName.LATEST).send().balance
-                val balanceEth = Convert.fromWei(balanceWei.toString(), Convert.Unit.ETHER)
-                val formattedBalance = String.format("%.8f", balanceEth.toDouble())
-
-                Log.d(TAG, "✅ Balance fetched successfully: $formattedBalance ETH for $address")
-                return@withContext formattedBalance
-            } catch (e: Exception) {
-                Log.w(TAG, "Balance fetch attempt ${attempt + 1} failed: ${e.message}")
-                if (attempt < maxRetries - 1) {
-                    delay(500L * (attempt + 1))
-                }
-            }
-        }
-
-        Log.e(TAG, "❌ Failed to fetch balance after $maxRetries attempts")
-        return@withContext "0.00000000"
-    }
-
-    /**
-     * Get detailed connection status
-     */
-    suspend fun getDetailedConnectionStatus(): ConnectionStatus = withContext(Dispatchers.IO) {
-        try {
-            val isConnected = isConnected()
-            if (!isConnected) {
-                return@withContext ConnectionStatus(false, error = "Not connected to blockchain")
-            }
-
-            val networkId = web3j.netVersion().send().netVersion
-            val latestBlock = web3j.ethBlockNumber().send().blockNumber.toLong()
-            val gasPrice = getCurrentGasPrice().toString()
-
-            ConnectionStatus(
-                isConnected = true,
-                networkId = networkId,
-                latestBlock = latestBlock,
-                gasPrice = gasPrice
-            )
-        } catch (e: Exception) {
-            ConnectionStatus(
-                isConnected = false,
-                error = e.message
-            )
-        }
-    }
 }
 
-// Data classes for enhanced functionality
-data class FundingAccount(
-    val address: String,
-    val credentials: Credentials
-)
-
-data class TransactionInfo(
-    val hash: String,
-    val from: String,
-    val to: String,
-    val value: String,
-    val blockNumber: Long,
-    val timestamp: Long
-)
-
 /**
- * Enhanced connection status with details
+ * Result classes for blockchain operations
  */
-data class ConnectionStatus(
-    val isConnected: Boolean,
-    val networkId: String = "",
-    val latestBlock: Long = 0,
-    val gasPrice: String = "",
-    val error: String? = null
-)
+sealed class VoteResult {
+    data class Success(val transactionHash: String, val gasUsed: String) : VoteResult()
+    data class Pending(val transactionHash: String) : VoteResult()
+    data class Error(val message: String) : VoteResult()
+}
+
+sealed class TransactionResult {
+    data class Success(val transactionHash: String, val gasUsed: String) : TransactionResult()
+    data class Pending(val transactionHash: String) : TransactionResult()
+    data class Error(val message: String) : TransactionResult()
+}
+
+sealed class TransactionStatus {
+    data class Confirmed(val gasUsed: String) : TransactionStatus()
+    data class Failed(val reason: String) : TransactionStatus()
+    data object Pending : TransactionStatus()
+    data object Unknown : TransactionStatus()
+}

@@ -474,24 +474,7 @@ class IntegratedEnhancedUserRepository(private val context: Context) {
     /**
      * Try to fund the voter address dengan ETH untuk transaction fees
      */
-    private suspend fun tryFundingAddress(voterAddress: String): String {
-        return try {
-            val txHash = withContext(Dispatchers.IO) {
-                BlockchainManager.fundVoterAddress(voterAddress)
-            }
 
-            if (txHash.isNotEmpty()) {
-                Log.d(TAG, "✅ Address funded successfully: $txHash")
-            } else {
-                Log.w(TAG, "⚠️ Address funding returned empty hash")
-            }
-
-            txHash
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Address funding failed: ${e.message}")
-            ""
-        }
-    }
 
     /**
      * Try to register address on blockchain smart contract (optional)
