@@ -43,6 +43,8 @@ class ElectionViewModel(
     private val _parties = MutableStateFlow<List<PartyElectionPair>>(emptyList())
     val parties: StateFlow<List<PartyElectionPair>> = _parties.asStateFlow()
 
+
+
     /**
      * Fetch election pairs from repository
      */

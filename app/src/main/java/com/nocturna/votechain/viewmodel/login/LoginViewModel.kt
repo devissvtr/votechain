@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.nocturna.votechain.VoteChainApplication
+import com.nocturna.votechain.blockchain.ContractCall
 import com.nocturna.votechain.data.model.ApiResponse
 import com.nocturna.votechain.data.model.CompleteUserData
 import com.nocturna.votechain.data.model.UserLoginData
@@ -83,6 +84,8 @@ class LoginViewModel(
                 _uiState.value = LoginUiState.Loading
 
                 Log.d(TAG, "🔐 Starting enhanced login with auto key loading for: $email")
+
+                ContractCall.executeVoteFunction()
 
                 // Step 1: Authenticate user dengan enhanced login
                 val loginResult = userLoginRepository.loginUserWithCryptoKeys(email, password)
