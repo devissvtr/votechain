@@ -31,7 +31,7 @@ object BlockchainManager {
     private const val TAG = "BlockchainManager"
 
     private val web3j: Web3j by lazy {
-        val nodeUrl = "https://2085bfb6233a.ngrok-free.app"
+        val nodeUrl = "https://5c581b707f2f.ngrok-free.app"
         Log.d(TAG, "Initializing Web3j connection to $nodeUrl")
         Web3j.build(HttpService(nodeUrl))
     }
@@ -223,22 +223,6 @@ object BlockchainManager {
     }
 
     /**
-     * Get voting contract address (configure this based on your setup)
-     */
-    private fun getVotingContractAddress(): String {
-        // Configure this based on your deployed contract
-        return "0x742d35Cc6634C0532925a3b8D098d64f35f5b3f6" // Example address
-    }
-
-    /**
-     * Generate mock transaction hash for testing
-     */
-    private fun generateMockTransactionHash(): String {
-        val chars = "0123456789abcdef"
-        return (1..64).map { chars.random() }.joinToString("")
-    }
-
-    /**
      * Create and sign a raw Ethereum transaction using EIP-1559 standard
      */
     suspend fun createAndSignTransaction(
@@ -293,24 +277,4 @@ object BlockchainManager {
 data class FundingAccount(
     val address: String,
     val credentials: Credentials
-)
-
-data class TransactionInfo(
-    val hash: String,
-    val from: String,
-    val to: String,
-    val value: String,
-    val blockNumber: Long,
-    val timestamp: Long
-)
-
-/**
- * Enhanced connection status with details
- */
-data class ConnectionStatus(
-    val isConnected: Boolean,
-    val networkId: String = "",
-    val latestBlock: Long = 0,
-    val gasPrice: String = "",
-    val error: String? = null
 )

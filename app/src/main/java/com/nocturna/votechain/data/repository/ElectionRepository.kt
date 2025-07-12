@@ -1,16 +1,13 @@
 package com.nocturna.votechain.data.repository
 
-import android.graphics.drawable.Drawable
 import android.util.Log
 import com.nocturna.votechain.data.model.Candidate
 import com.nocturna.votechain.data.model.Education
 import com.nocturna.votechain.data.model.ElectionPair
 import com.nocturna.votechain.data.model.Party
-import com.nocturna.votechain.data.model.PartyElectionPair
 import com.nocturna.votechain.data.model.SupportingParty
 import com.nocturna.votechain.data.model.WorkExperience
 import com.nocturna.votechain.data.network.ElectionNetworkClient
-import com.nocturna.votechain.data.network.PartyPhotoHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow

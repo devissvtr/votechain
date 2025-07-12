@@ -48,6 +48,7 @@ import com.nocturna.votechain.utils.CoilAuthHelper
 import com.nocturna.votechain.utils.LanguageManager
 import com.nocturna.votechain.utils.VoteErrorHandler
 import androidx.compose.runtime.collectAsState
+import com.nocturna.votechain.data.repository.VoterRepository
 import com.nocturna.votechain.viewmodel.candidate.ElectionViewModel
 import com.nocturna.votechain.viewmodel.vote.VotingViewModel
 import com.nocturna.votechain.viewmodel.vote.VotingViewModel.VoteState
@@ -130,18 +131,89 @@ fun CandidateSelectionScreen(
         }
     }
 
-    // FIXED: Add user region retrieval
-    fun getUserRegion(): String {
-        val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
-        return sharedPreferences.getString("user_region", null)
-            ?: sharedPreferences.getString("region", null)
-            ?: "default"
+    suspend fun getUserRegion(): String {
+        return try {
+            Log.d("CandidateSelectionScreen", "🌍 Retrieving user region from VoterData...")
+
+            // Step 1: Try to get region from VoterData (most reliable)
+            val voterRepository = VoterRepository(context)
+            val voterData = voterRepository.getVoterData()
+
+            if (voterData != null && voterData.region.isNotBlank()) {
+                Log.d("CandidateSelectionScreen", "✅ Region found in VoterData: ${voterData.region}")
+                return voterData.region
+            }
+
+            // Step 2: If VoterData region is empty, try to fetch from API
+            Log.w("CandidateSelectionScreen", "⚠️ VoterData region empty, fetching from API...")
+
+            val token = ElectionNetworkClient.getUserToken()
+            if (token.isNotEmpty()) {
+                voterRepository.fetchVoterData(token).fold(
+                    onSuccess = { fetchedVoterData ->
+                        if (fetchedVoterData.region.isNotBlank()) {
+                            Log.d("CandidateSelectionScreen", "✅ Region fetched from API: ${fetchedVoterData.region}")
+                            return fetchedVoterData.region
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.e("CandidateSelectionScreen", "❌ Failed to fetch voter data from API: ${error.message}")
+                    }
+                )
+            }
+
+            // Step 3: Fallback to SharedPreferences (legacy)
+            Log.w("CandidateSelectionScreen", "⚠️ Using SharedPreferences fallback for region")
+            val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
+            val fallbackRegion = sharedPreferences.getString("user_region", null)
+                ?: sharedPreferences.getString("region", null)
+                ?: "default"
+
+            Log.d("CandidateSelectionScreen", "📱 Fallback region from SharedPreferences: $fallbackRegion")
+            fallbackRegion
+
+        } catch (e: Exception) {
+            Log.e("CandidateSelectionScreen", "❌ Exception getting user region: ${e.message}", e)
+
+            // Ultimate fallback
+            val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
+            val ultimateFallback = sharedPreferences.getString("region", "default") ?: "default"
+
+            Log.d("CandidateSelectionScreen", "🆘 Ultimate fallback region: $ultimateFallback")
+            ultimateFallback
+        }
     }
 
-    // FIXED: Add OTP token retrieval
     fun getOTPToken(): String {
         val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
-        return sharedPreferences.getString("otp_token", null) ?: ""
+        val token = sharedPreferences.getString("otp_token", null) ?: ""
+        val createdTime = sharedPreferences.getLong("otp_token_created", 0)
+
+        Log.d("CandidateSelectionScreen", "Retrieving OTP token:")
+        Log.d("CandidateSelectionScreen", "  - Token found: ${if (token.isNotEmpty()) "Yes (${token.length} chars)" else "No"}")
+
+        if (token.isNotEmpty() && createdTime > 0) {
+            val tokenAge = System.currentTimeMillis() - createdTime
+            val maxAge = 5 * 60 * 1000L // 5 minutes
+
+            Log.d("CandidateSelectionScreen", "  - Token age: ${tokenAge / 1000}s")
+            Log.d("CandidateSelectionScreen", "  - Max age: ${maxAge / 1000}s")
+
+            if (tokenAge > maxAge) {
+                Log.w("CandidateSelectionScreen", "⚠️ OTP token is too old, clearing it")
+                // Clear the expired token
+                with(sharedPreferences.edit()) {
+                    remove("otp_token")
+                    remove("otp_token_created")
+                    remove("otp_token_expiry")
+                    apply()
+                }
+                return ""
+            }
+        }
+
+        Log.d("CandidateSelectionScreen", "  - Returning token: ${if (token.isNotEmpty()) "Valid" else "Empty"}")
+        return token
     }
 
     Scaffold(
@@ -284,12 +356,19 @@ fun CandidateSelectionScreen(
 
     // Confirmation Dialog
     if (showConfirmationDialog) {
+        var userRegion by remember { mutableStateOf("default") }
+
+        LaunchedEffect(showConfirmationDialog) {
+            if (showConfirmationDialog) {
+                userRegion = getUserRegion()
+                Log.d("CandidateSelectionScreen", "🌍 Dialog region loaded: $userRegion")
+            }
+        }
+
         VoteConfirmationDialog(
             onConfirm = {
                 showConfirmationDialog = false
                 selectedCandidateId?.let { electionPairId ->
-                    // FIXED: Get proper region and OTP token
-                    val userRegion = getUserRegion()
                     val otpToken = getOTPToken()
 
                     Log.d("CandidateSelectionScreen", "Submitting vote:")

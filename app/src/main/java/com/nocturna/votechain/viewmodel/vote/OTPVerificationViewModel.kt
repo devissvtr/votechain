@@ -137,10 +137,28 @@ class OTPVerificationViewModel(
                         Log.d(TAG, "OTP verification response received")
                         if (response.data?.is_valid == true) {
                             Log.d(TAG, "OTP verification successful")
+                            // Get the OTP token from the response or use the submitted OTP code as fallback
+                            val token = response.data.otp_token ?: otpCode
+
+                            // If we have a valid token from response, store it for future use
+                            if (!response.data.otp_token.isNullOrEmpty()) {
+                                Log.d(TAG, "Storing OTP token from response: ${response.data.otp_token?.take(8)}...")
+                                // Store the token in the local state instead of using the private repository method
+                                _uiState.value = _uiState.value.copy(
+                                    otpToken = response.data.otp_token
+                                )
+                            } else {
+                                // If no token in response but verification passed, store the OTP code itself
+                                Log.d(TAG, "No token in response, using verified OTP code as token")
+                                _uiState.value = _uiState.value.copy(
+                                    otpToken = otpCode
+                                )
+                            }
+
                             _uiState.value = _uiState.value.copy(
                                 isVerifying = false,
                                 isVerificationSuccess = true,
-                                otpToken = response.data.otp_token,
+                                otpToken = token,
                                 error = null
                             )
                         } else {

@@ -10,23 +10,24 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class CandidateRepository {
-    
-    suspend fun getCandidateById(candidateId: String): CandidateDetailData = withContext(Dispatchers.IO) {
-        // Simulate network delay
-        delay(500)
 
-        // For now, return dummy data
-        // In real implementation, the data would come from a database or API
-        return@withContext when (candidateId) {
-            "anies" -> getDummyAniesData()
-            "prabowo" -> getDummyPrabowoData()
-            "ganjar" -> getDummyGanjarData()
-            "imin" -> getDummyIminData()
-            "gibran" -> getDummyGibranData()
-            "mahfud" -> getDummyMahfudData()
-            else -> getDummyAniesData() // Default to Anies data for now
+    suspend fun getCandidateById(candidateId: String): CandidateDetailData =
+        withContext(Dispatchers.IO) {
+            // Simulate network delay
+            delay(500)
+
+            // For now, return dummy data
+            // In real implementation, the data would come from a database or API
+            return@withContext when (candidateId) {
+                "anies" -> getDummyAniesData()
+                "prabowo" -> getDummyPrabowoData()
+                "ganjar" -> getDummyGanjarData()
+                "imin" -> getDummyIminData()
+                "gibran" -> getDummyGibranData()
+                "mahfud" -> getDummyMahfudData()
+                else -> getDummyAniesData() // Default to Anies data for now
+            }
         }
-    }
 
     // Dummy data methods
     private fun getDummyAniesData(): CandidateDetailData {
@@ -46,13 +47,26 @@ class CandidateRepository {
                 EducationEntry("SD Negeri Laboratori 2 Yogyakarta", "1976 - 1982"),
                 EducationEntry("SMP Negeri 5 Yogyakarta", "1982 - 1985"),
                 EducationEntry("SMA Negeri 2 Yogyakarta", "1985 - 1989"),
-                EducationEntry("Fakultas Ekonomi, Universitas Gadjah Mada, Yogyakarta", "1989 - 1995"),
-                EducationEntry("Departemen Kebijakan Publik, University of Maryland, College Park, AS", "1996 - 1998"),
-                EducationEntry("Departemen Ilmu Politik, Northern Illinois University, AS", "1999 - 2007")
+                EducationEntry(
+                    "Fakultas Ekonomi, Universitas Gadjah Mada, Yogyakarta",
+                    "1989 - 1995"
+                ),
+                EducationEntry(
+                    "Departemen Kebijakan Publik, University of Maryland, College Park, AS",
+                    "1996 - 1998"
+                ),
+                EducationEntry(
+                    "Departemen Ilmu Politik, Northern Illinois University, AS",
+                    "1999 - 2007"
+                )
             ),
             workHistory = listOf(
                 WorkEntry("The Indonesian Institute", "Direktur Riset", "2005 - 2009"),
-                WorkEntry("Kemitraan-Partnership for Governance Reform", "Direktur Riset", "2006 - 2007"),
+                WorkEntry(
+                    "Kemitraan-Partnership for Governance Reform",
+                    "Direktur Riset",
+                    "2006 - 2007"
+                ),
                 WorkEntry("Universitas Paramadina", "Rektor", "2007 - 2014"),
                 WorkEntry("Kementerian Pendidikan dan Kebudayaan", "Menteri", "2014 - 2016"),
                 WorkEntry("Pemerintah Provinsi DKI Jakarta", "Gubernur", "2017 - 2022")
@@ -129,7 +143,10 @@ class CandidateRepository {
             educationHistory = listOf(
                 EducationEntry("Pondok Pesantren Tebuireng, Jombang", "1978 - 1984"),
                 EducationEntry("Al-Azhar University, Kairo", "1985 - 1989"),
-                EducationEntry("Fakultas Ilmu Sosial dan Ilmu Politik, Universitas Indonesia", "1989 - 1993")
+                EducationEntry(
+                    "Fakultas Ilmu Sosial dan Ilmu Politik, Universitas Indonesia",
+                    "1989 - 1993"
+                )
             ),
             workHistory = listOf(
                 WorkEntry("DPR RI", "Anggota", "1999 - 2004"),
@@ -181,7 +198,10 @@ class CandidateRepository {
                 photoResId = R.drawable.ic_launcher_background
             ),
             educationHistory = listOf(
-                EducationEntry("Fakultas Hukum, Universitas Islam Indonesia, Yogyakarta", "1979 - 1983"),
+                EducationEntry(
+                    "Fakultas Hukum, Universitas Islam Indonesia, Yogyakarta",
+                    "1979 - 1983"
+                ),
                 EducationEntry("Magister Ilmu Hukum, Universitas Islam Indonesia", "1987 - 1989"),
                 EducationEntry("Program Doktor Ilmu Hukum, Universitas Gadjah Mada", "1991 - 1993")
             ),

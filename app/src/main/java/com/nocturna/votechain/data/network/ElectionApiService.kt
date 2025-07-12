@@ -3,13 +3,10 @@ package com.nocturna.votechain.data.network
 import com.nocturna.votechain.data.model.ElectionPairsResponse
 import com.nocturna.votechain.data.model.PartyResponse
 import com.nocturna.votechain.data.model.SupportingPartiesResponse
-import com.nocturna.votechain.data.model.VisionMissionApiResponse
 import com.nocturna.votechain.data.model.VisionMissionDetailResponse
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.GET
-import retrofit2.http.Header
-import retrofit2.http.Headers
 import retrofit2.http.Path
 import retrofit2.http.Streaming
 

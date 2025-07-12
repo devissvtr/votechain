@@ -2,14 +2,10 @@ package com.nocturna.votechain.data.network
 
 import android.util.Log
 import com.google.gson.GsonBuilder
-import com.nocturna.votechain.data.model.ProvinceResponse
-import com.nocturna.votechain.data.model.RegencyResponse
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.GET
-import retrofit2.http.Path
 import java.util.concurrent.TimeUnit
 
 object WilayahApiClient {
