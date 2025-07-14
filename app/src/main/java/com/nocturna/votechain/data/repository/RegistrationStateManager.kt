@@ -61,32 +61,4 @@ class RegistrationStateManager(context: Context) {
     fun getSavedEmail(): String {
         return preferences.getString(KEY_EMAIL, "") ?: ""
     }
-
-    /**
-     * Get the saved NIK
-     */
-    fun getSavedNik(): String {
-        return preferences.getString(KEY_NIK, "") ?: ""
-    }
-
-    /**
-     * Check if a registration request is pending
-     */
-    fun isRegistrationPending(): Boolean {
-        return getRegistrationState() == STATE_WAITING
-    }
-
-    /**
-     * Check if a registration has been approved
-     */
-    fun isRegistrationApproved(): Boolean {
-        return getRegistrationState() == STATE_APPROVED
-    }
-
-    /**
-     * Check if a registration has been rejected
-     */
-    fun isRegistrationRejected(): Boolean {
-        return getRegistrationState() == STATE_REJECTED
-    }
 }

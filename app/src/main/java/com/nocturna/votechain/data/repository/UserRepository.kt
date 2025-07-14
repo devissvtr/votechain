@@ -11,16 +11,13 @@ import com.nocturna.votechain.data.model.UserRegistrationData
 import com.nocturna.votechain.data.network.NetworkClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Response
 import java.io.File
 import java.io.FileOutputStream
-import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 /**
  * Repository class to handle user-related operations

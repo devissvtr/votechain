@@ -3,7 +3,6 @@ package com.nocturna.votechain.data.network
 import android.content.Context
 import android.util.Log
 import com.google.gson.GsonBuilder
-import com.nocturna.votechain.data.model.PartyResponse
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -65,7 +64,7 @@ object ElectionNetworkClient {
      */
     @Synchronized
     fun ensureInitialized(context: Context): Boolean {
-        if (!isInitialized() && context != null) {
+        if (!isInitialized()) {
             Log.w(TAG, "Re-initializing ElectionNetworkClient")
             initialize(context)
             return true
@@ -168,25 +167,6 @@ object ElectionNetworkClient {
     }
 
     /**
-     * Get user token with validation
-     */
-    fun getValidatedUserToken(): String {
-        val token = getUserToken()
-        return if (validateTokenFormat(token)) {
-            // Remove Bearer prefix if present for consistency
-            if (token.startsWith("Bearer ", ignoreCase = true)) {
-                token.substring(7).trim()
-            } else {
-                token.trim()
-            }
-        } else {
-            Log.w(TAG, "Invalid token format detected, clearing token")
-            clearUserToken()
-            ""
-        }
-    }
-
-    /**
      * Create authentication interceptor for election API
      */
     private fun createAuthInterceptor(): Interceptor {
@@ -266,36 +246,6 @@ object ElectionNetworkClient {
     val electionApiService: ElectionApiService by lazy {
         retrofit.create(ElectionApiService::class.java)
     }
-
-    /**
-     * Create a new OkHttpClient with specific token for election requests
-     */
-    fun createClientWithToken(token: String): OkHttpClient {
-        val loggingInterceptor = HttpLoggingInterceptor { message ->
-            Log.d(TAG, message)
-        }.apply {
-            level = HttpLoggingInterceptor.Level.BODY
-        }
-
-        val tokenInterceptor = Interceptor { chain ->
-            val originalRequest = chain.request()
-            val newRequest = originalRequest.newBuilder()
-                .addHeader("Authorization", "Bearer $token")
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/json")
-                .build()
-            chain.proceed(newRequest)
-        }
-
-        return OkHttpClient.Builder()
-            .addInterceptor(loggingInterceptor)
-            .addInterceptor(tokenInterceptor)
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true)
-            .build()
-    }
 }
 
 class PartyPhotoHelper {
@@ -305,21 +255,6 @@ class PartyPhotoHelper {
          */
         fun getPartyPhotoUrl(partyId: String): String {
             return "${ElectionNetworkClient.BASE_URL}/v1/party/$partyId/photo"
-        }
-
-        /**
-         * Generate URLs untuk semua partai dari response
-         */
-        fun getPartyPhotoUrls(partyResponse: PartyResponse): Map<String, String> {
-            val photoUrls = mutableMapOf<String, String>()
-
-            partyResponse.data.parties.forEach { partyPair ->
-                val partyId = partyPair.party.id
-                val partyName = partyPair.party.name
-                photoUrls[partyName] = getPartyPhotoUrl(partyId)
-            }
-
-            return photoUrls
         }
     }
 }

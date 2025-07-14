@@ -34,7 +34,6 @@ class LiveResultsWebSocketManager {
         private const val WEBSOCKET_URL = "ws://e59519efec3b.ngrok-free.app/v1/live/ws"
         private const val RECONNECT_DELAY = 5000L // 5 seconds
         private const val MAX_RECONNECT_ATTEMPTS = 5
-        private const val CONNECTION_TIMEOUT = 10L
     }
 
     private val gson = Gson()
@@ -240,20 +239,6 @@ class LiveResultsWebSocketManager {
         if (!success) {
             Log.e(TAG, "Failed to send subscription message")
             _error.value = "Failed to send subscription message"
-        }
-    }
-
-    /**
-     * Parse voting result from server data
-     * Adapt this method based on your actual API response format
-     */
-    private fun parseVotingResult(data: Any?): VotingResult? {
-        try {
-            val json = gson.toJson(data)
-            return gson.fromJson(json, VotingResult::class.java)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse VotingResult", e)
-            return null
         }
     }
 

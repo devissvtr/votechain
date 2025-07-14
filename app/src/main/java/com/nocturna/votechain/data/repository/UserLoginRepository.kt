@@ -35,14 +35,6 @@ class UserLoginRepository(private val context: Context) {
     private val KEY_LOGIN_TIMESTAMP = "login_timestamp"
     private val KEY_USER_PASSWORD_HASH = "user_password_hash"
     private val KEY_USER_EXPIRES_AT = "expires_at"
-    private val KEY_SESSION_EXPIRY = "session_expiry"
-    private val KEY_FAILED_LOGIN_ATTEMPTS = "failed_login_attempts"
-    private val KEY_LAST_FAILED_ATTEMPT = "last_failed_attempt"
-
-    // Security constants
-    private val MAX_LOGIN_ATTEMPTS = 5
-    private val LOCKOUT_DURATION = 30 * 60 * 1000L // 30 minutes
-    private val SESSION_DURATION = 24 * 60 * 60 * 1000L // 24 hours
 
     // Initialize encrypted shared preferences for storing sensitive data
     private val masterKey = MasterKey.Builder(context)

@@ -1,6 +1,5 @@
 package com.nocturna.votechain.data.repository
 
-import com.nocturna.votechain.data.repository.UserRepository
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -9,15 +8,11 @@ import com.nocturna.votechain.data.model.ApiResponse
 import com.nocturna.votechain.data.model.UserRegistrationData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.security.SecureRandom
-import org.web3j.crypto.Keys
-import org.web3j.crypto.ECKeyPair
-import org.web3j.utils.Numeric
 
 /**
  * Extended UserRepository that supports voter address generation
  */
-class EnhancedUserRepository(private val context: Context) {
+class EnhancedUserRepository(context: Context) {
     private val userRepository = UserRepository(context)
     private val TAG = "EnhancedUserRepository"
 

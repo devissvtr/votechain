@@ -1,6 +1,5 @@
 package com.nocturna.votechain.data.network
 
-import com.nocturna.votechain.data.model.VoteCastData
 import com.nocturna.votechain.data.model.VoteCastRequest
 import com.nocturna.votechain.data.model.VoteCastResponse
 import retrofit2.Response

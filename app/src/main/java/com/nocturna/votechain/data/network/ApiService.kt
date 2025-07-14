@@ -76,16 +76,6 @@ interface ApiService {
     ): Response<ApiResponse<VerificationStatusData>>
 
     /**
-     * Get user verification status with manual token
-     * Endpoint: /v1/user/verification-status/{email}
-     */
-    @GET("v1/user/verification-status/{email}")
-    suspend fun getVerificationStatusWithToken(
-        @Path("email") email: String,
-        @Header("Authorization") token: String
-    ): Response<ApiResponse<VerificationStatusData>>
-
-    /**
      * Get user profile by email
      * Endpoint: /v1/user/{email}
      */

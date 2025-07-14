@@ -11,7 +11,7 @@ import kotlinx.coroutines.launch
 
 class ForgotPasswordViewModel(private val context: Context) : ViewModel() {
 
-    private val repository = ForgotPasswordRepository(context)
+    private val repository = ForgotPasswordRepository()
 
     // Remove local OTP storage - OTP will be handled server-side
     private val _uiState = MutableStateFlow<ForgotPasswordUiState>(ForgotPasswordUiState.Initial)

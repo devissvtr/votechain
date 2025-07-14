@@ -1,7 +1,10 @@
 package com.nocturna.votechain.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Text
@@ -16,7 +19,6 @@ import com.nocturna.votechain.data.model.WorkEntry
 import com.nocturna.votechain.ui.theme.AppTypography
 import com.nocturna.votechain.ui.theme.NeutralColors
 import com.nocturna.votechain.utils.LanguageManager
-import com.nocturna.votechain.utils.LocalizedStrings
 
 /**
  * Displays a table row with label and value

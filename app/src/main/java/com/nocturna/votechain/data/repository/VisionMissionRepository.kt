@@ -1,16 +1,13 @@
 package com.nocturna.votechain.data.repository
 
 import android.util.Log
-import com.nocturna.votechain.data.model.VisionMissionModel
 import com.nocturna.votechain.data.model.VisionMissionDetailModel
+import com.nocturna.votechain.data.model.VisionMissionModel
 import com.nocturna.votechain.data.model.WorkProgram
-import com.nocturna.votechain.data.network.ElectionApiService
 import com.nocturna.votechain.data.network.ElectionNetworkClient
-import com.nocturna.votechain.data.network.NetworkClient.apiService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.ResponseBody
-import javax.inject.Inject
 
 /**
  * Repository interface for Vision Mission data
@@ -63,14 +60,14 @@ class VisionMissionRepositoryImpl : VisionMissionRepository {
                         Log.d(TAG, "Successfully fetched vision mission detail")
 
                         // Check if vision is empty or null, use "data tidak tersedia" as fallback
-                        val vision = if (data.vision.isNullOrBlank()) {
+                        val vision = if (data.vision.isBlank()) {
                             "Data tidak tersedia"
                         } else {
                             data.vision
                         }
 
                         // Check if mission is empty or null, use "data tidak tersedia" as fallback
-                        val mission = if (data.mission.isNullOrBlank()) {
+                        val mission = if (data.mission.isBlank()) {
                             "Data tidak tersedia"
                         } else {
                             data.mission
@@ -78,7 +75,7 @@ class VisionMissionRepositoryImpl : VisionMissionRepository {
 
                         // Convert API work programs to UI work programs
                         // If work_program is null or empty, create empty list
-                        val workPrograms = if (data.work_program.isNullOrEmpty()) {
+                        val workPrograms = if (data.work_program.isEmpty()) {
                             emptyList()
                         } else {
                             data.work_program.map { workProgramResponse ->
@@ -88,7 +85,7 @@ class VisionMissionRepositoryImpl : VisionMissionRepository {
                                         // Build full URL for program photo if available
                                         if (it.startsWith("http")) it else "${ElectionNetworkClient.BASE_URL}/$it"
                                     },
-                                    programDesc = if (workProgramResponse.program_desc.isNullOrEmpty()) {
+                                    programDesc = if (workProgramResponse.program_desc.isEmpty()) {
                                         listOf("Data tidak tersedia")
                                     } else {
                                         workProgramResponse.program_desc
@@ -170,48 +167,6 @@ class VisionMissionRepositoryImpl : VisionMissionRepository {
     }
 
     /**
-     * Fallback method to provide hardcoded data when API is unavailable
-     */
-    private fun getFallbackVisionMissionData(pairId: String): VisionMissionDetailModel {
-        return VisionMissionDetailModel(
-            id = pairId,
-            electionPairId = pairId,
-            vision = "Indonesia Adil Makmur Untuk Semua",
-            mission = "Memastikan Ketersediaan Kebutuhan Pokok dan Biaya Hidup Murah melalui Kemandirian Pangan, Ketahanan Energi, dan Kedaulatan Air. Mengentaskan Kemiskinan dengan Memperluas Kesempatan Berusaha dan Menciptakan Lapangan Kerja.",
-            workPrograms = listOf(
-                WorkProgram(
-                    programName = "Program Kemandirian Pangan",
-                    programPhoto = null,
-                    programDesc = listOf(
-                        "Meningkatkan produktivitas pertanian",
-                        "Mengembangkan teknologi pertanian modern",
-                        "Memperkuat sistem distribusi pangan"
-                    )
-                ),
-                WorkProgram(
-                    programName = "Program Lapangan Kerja",
-                    programPhoto = null,
-                    programDesc = listOf(
-                        "Menciptakan 1 juta lapangan kerja baru",
-                        "Mengembangkan UMKM di seluruh Indonesia",
-                        "Meningkatkan keterampilan tenaga kerja"
-                    )
-                ),
-                WorkProgram(
-                    programName = "Program Pendidikan Berkualitas",
-                    programPhoto = null,
-                    programDesc = listOf(
-                        "Meningkatkan akses pendidikan untuk semua",
-                        "Mengembangkan kurikulum yang relevan",
-                        "Memperkuat fasilitas pendidikan"
-                    )
-                )
-            ),
-            programDocs = null
-        )
-    }
-
-    /**
      * Legacy method - keep for backward compatibility
      * @param candidateNumber The candidate number (1, 2, 3)
      * @return VisionMissionModel with hardcoded data
@@ -263,7 +218,7 @@ class VisionMissionRepositoryImpl : VisionMissionRepository {
      * @param pairId The election pair ID
      * @return Result containing okhttp3.ResponseBody for the PDF file
      */
-    override suspend fun getProgramDocsFromAPI(pairId: String): Result<okhttp3.ResponseBody> = withContext(Dispatchers.IO) {
+    override suspend fun getProgramDocsFromAPI(pairId: String): Result<ResponseBody> = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Fetching program docs for pair ID: $pairId")
 

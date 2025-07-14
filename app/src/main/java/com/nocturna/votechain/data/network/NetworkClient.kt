@@ -18,7 +18,6 @@ object NetworkClient {
     private const val TAG = "NetworkClient"
     private const val PREFS_NAME = "VoteChainPrefs"
     private const val KEY_USER_TOKEN = "user_token"
-    private const val KEY_TEMP_API_KEY = "temporary_api_key" // Added for initial registration
 
     private var applicationContext: Context? = null
 
@@ -159,23 +158,6 @@ object NetworkClient {
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
-            .build()
-    }
-
-    /**
-     * Create a Retrofit instance with a specific token
-     * Useful for one-off requests with a specific token
-     */
-    fun createRetrofitWithToken(token: String): Retrofit {
-        val gson = GsonBuilder()
-            .setLenient()
-            .serializeNulls()
-            .create()
-
-        return Retrofit.Builder()
-            .baseUrl(BASE_URL)
-            .client(createClientWithToken(token))
-            .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
     }
 

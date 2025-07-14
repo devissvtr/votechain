@@ -1,4 +1,4 @@
-package com.nocturna.votechain.ui.screens.register
+package com.nocturna.votechain.navigation
 
 import android.util.Log
 import androidx.compose.runtime.Composable
@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.nocturna.votechain.data.repository.RegistrationStateManager
+import com.nocturna.votechain.ui.screens.register.RegisterScreen
 import com.nocturna.votechain.viewmodel.register.RegisterViewModel
 
 /**

@@ -1,6 +1,5 @@
 package com.nocturna.votechain.data.repository
 
-import android.content.Context
 import android.util.Log
 import com.nocturna.votechain.data.model.ApiResponse
 import com.nocturna.votechain.data.network.NetworkClient
@@ -13,7 +12,7 @@ import org.json.JSONObject
 /**
  * Repository for handling forgot password flow API interactions
  */
-class ForgotPasswordRepository(private val context: Context) {
+class ForgotPasswordRepository() {
     private val TAG = "ForgotPasswordRepository"
     private val networkManager = NetworkClient.apiService
 

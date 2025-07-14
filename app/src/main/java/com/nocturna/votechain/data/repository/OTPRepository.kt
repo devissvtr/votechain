@@ -6,10 +6,7 @@ import com.nocturna.votechain.data.model.OTPGenerateRequest
 import com.nocturna.votechain.data.model.OTPGenerateResponse
 import com.nocturna.votechain.data.model.OTPVerifyRequest
 import com.nocturna.votechain.data.model.OTPVerifyResponse
-import com.nocturna.votechain.data.model.VoterData
-import com.nocturna.votechain.data.network.NetworkClient
 import com.nocturna.votechain.data.network.NetworkClient.otpApiService
-import com.nocturna.votechain.data.network.OTPApiService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -49,7 +46,7 @@ class OTPRepository(private val context: Context) {
                     )
 
                     Log.d(TAG, "Generating OTP with request: phone=${request.phone_number}, voter_id=${request.voter_id}")
-                    val response = NetworkClient.otpApiService.generateOTP("Bearer $token", request)
+                    val response = otpApiService.generateOTP("Bearer $token", request)
 
                     if (response.isSuccessful) {
                         response.body()?.let { otpResponse ->

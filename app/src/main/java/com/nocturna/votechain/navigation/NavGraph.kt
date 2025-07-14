@@ -3,17 +3,8 @@ package com.nocturna.votechain.navigation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.nocturna.votechain.ui.screens.login.LoginScreen
-import com.nocturna.votechain.ui.screens.homepage.CandidatePresidentScreen
-import com.nocturna.votechain.ui.screens.homepage.DetailCandidateScreen
-import com.nocturna.votechain.ui.screens.homepage.HomeScreen
-import com.nocturna.votechain.ui.screens.homepage.VisionMissionScreen
-import com.nocturna.votechain.ui.screens.register.AcceptedScreen
-import com.nocturna.votechain.ui.screens.register.RejectedScreen
-import com.nocturna.votechain.ui.screens.register.WaitingScreen
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -24,12 +15,19 @@ import com.nocturna.votechain.ui.screens.LoadingScreen
 import com.nocturna.votechain.ui.screens.SplashScreen
 import com.nocturna.votechain.ui.screens.auth.EmailVerificationScreen
 import com.nocturna.votechain.ui.screens.forgotpassword.ResetPasswordScreen
-import com.nocturna.votechain.ui.screens.votepage.CandidateSelectionScreen
+import com.nocturna.votechain.ui.screens.homepage.CandidatePresidentScreen
+import com.nocturna.votechain.ui.screens.homepage.DetailCandidateScreen
+import com.nocturna.votechain.ui.screens.homepage.HomeScreen
 import com.nocturna.votechain.ui.screens.homepage.NotificationScreen
+import com.nocturna.votechain.ui.screens.homepage.VisionMissionScreen
+import com.nocturna.votechain.ui.screens.login.LoginScreen
 import com.nocturna.votechain.ui.screens.profilepage.AccountDetailsScreen
 import com.nocturna.votechain.ui.screens.profilepage.FAQScreen
 import com.nocturna.votechain.ui.screens.profilepage.ProfileScreen
-import com.nocturna.votechain.ui.screens.register.RegistrationFlowController
+import com.nocturna.votechain.ui.screens.register.AcceptedScreen
+import com.nocturna.votechain.ui.screens.register.RejectedScreen
+import com.nocturna.votechain.ui.screens.register.WaitingScreen
+import com.nocturna.votechain.ui.screens.votepage.CandidateSelectionScreen
 import com.nocturna.votechain.ui.screens.votepage.LiveResultScreen
 import com.nocturna.votechain.ui.screens.votepage.OTPVotingVerificationScreen
 import com.nocturna.votechain.ui.screens.votepage.ResultsScreen
@@ -46,8 +44,6 @@ import com.nocturna.votechain.viewmodel.vote.VotingViewModel
 fun VotechainNavGraph(
     navController: NavHostController,
     startDestination: String = "splash",
-    modifier: Modifier = Modifier,
-    electionViewModel: ElectionViewModel,
     onNewsClick: (NewsItem) -> Unit = {}
 ) {
     // Get context for ViewModel factories
@@ -339,7 +335,6 @@ fun VotechainNavGraph(
             "candidate_president/{voteId}",
             arguments = listOf(navArgument("voteId") { type = NavType.StringType })
         ) {
-            val voteId = it.arguments?.getString("voteId") ?: ""
             CandidatePresidentScreen(
                 onBackClick = { navController.popBackStack() },
                 onViewProfileClick = { candidateId ->
