@@ -133,17 +133,7 @@ class VotingRepository(
                 return@flow
             }
 
-            // Step 4: Get or validate OTP token - IMPROVED OTP HANDLING
-            val finalOtpToken = otpToken ?: getValidOtpToken()
-            if (finalOtpToken.isNullOrEmpty()) {
-                Log.e(TAG, "❌ No valid OTP token available - Please verify OTP again")
-                emit(Result.failure(Exception("OTP verification required or token expired. Please verify OTP again.")))
-                return@flow
-            }
-
-            Log.d(TAG, "✅ Valid OTP token found: ${finalOtpToken.length} chars")
-
-            // Step 5: Generate signed transaction
+            // Step 4: Generate signed transaction
             val signedTransaction = signedTransactionGenerator.generateVoteTransaction(
                 electionPairId = electionPairId,
                 voterId = getVoterId() ?: "",
@@ -157,24 +147,20 @@ class VotingRepository(
                 return@flow
             }
 
-            Log.d(TAG, "✅ Transaction signed successfully, hex length: ${signedTransaction.length}")
-            Log.d(TAG, "✅ Signed transaction generated: ${signedTransaction.take(16)}...")
             Log.d(TAG, "✅ Signed transaction generated successfully")
 
-            // Step 6: Create vote request with validated OTP token
+            // Step 5: Create vote request
             val voteRequest = VoteCastRequest(
                 election_pair_id = electionPairId,
                 region = region,
                 voter_id = getVoterId() ?: "",
                 signed_transaction = signedTransaction,
-                otp_token = finalOtpToken
+                otp_token = getOtpToken() ?: ""  // Retrieve OTP token dynamically or handle null case
             )
 
-            // Log detailed OTP and request information
-            logVoteRequestDetails(voteRequest)
             Log.d(TAG, "📤 Sending vote request to server...")
 
-            // Step 7: Submit vote to server
+            // Step 6: Submit vote to server
             val response = voteApiService.castVoteWithOTP(
                 token = "Bearer $token",
                 request = voteRequest
@@ -190,16 +176,12 @@ class VotingRepository(
                     // Mark as voted
                     updateLocalVotingStatus(electionPairId, voteResponse.data?.tx_hash, signedTransaction)
 
-                    // Clear OTP token after successful vote
-                    otpRepository.clearOTPToken()
-
                     emit(Result.success(voteResponse))
                 } else {
                     Log.e(TAG, "❌ Empty response from server")
                     emit(Result.failure(Exception("Empty response from server")))
                 }
             } else {
-                val errorBody = response.errorBody()?.string()
                 val errorMessage = when (response.code()) {
                     400 -> "Invalid vote data. Please check your selection and try again."
                     401 -> "Authentication failed. Please login again."
@@ -207,13 +189,7 @@ class VotingRepository(
                     422 -> "Invalid transaction signature. Please restart app and try again."
                     429 -> "Too many requests. Please wait and try again."
                     500 -> "Server error. Please try again later."
-                    else -> "Vote failed: HTTP ${response.code()} - $errorBody"
-                }
-
-                // Clear OTP token if it's an auth or OTP-related error
-                if (response.code() in listOf(401, 422)) {
-                    Log.w(TAG, "⚠️ Clearing OTP token due to auth/OTP error")
-                    otpRepository.clearOTPToken()
+                    else -> "Vote failed: HTTP ${response.code()}"
                 }
 
                 Log.e(TAG, "❌ Vote casting failed: $errorMessage")
@@ -271,28 +247,10 @@ class VotingRepository(
     }
 
     /**
-     * Get the OTP token, ensuring it's fresh and valid
-     * Added to fix the OTP expiration issue
+     * Get OTP token from stored user data
      */
-    private fun getValidOtpToken(): String? {
-        // First check if we have a stored token
-        val storedToken = otpRepository.getStoredOTPToken()
-
-        if (storedToken.isNullOrEmpty()) {
-            Log.w(TAG, "⚠️ No OTP token found")
-            return null
-        }
-
-        // Check if the token is still valid
-        if (otpRepository.isOTPTokenValid()) {
-            // Token is valid
-            Log.d(TAG, "✅ OTP token is valid")
-            return storedToken
-        } else {
-            Log.w(TAG, "⚠️ OTP token is expired or invalid, clearing it")
-            otpRepository.clearOTPToken()
-            return null
-        }
+    private fun getOtpToken(): String? {
+        return otpRepository.getStoredOTPToken()
     }
 
     /**

@@ -48,7 +48,6 @@ import com.nocturna.votechain.utils.CoilAuthHelper
 import com.nocturna.votechain.utils.LanguageManager
 import com.nocturna.votechain.utils.VoteErrorHandler
 import androidx.compose.runtime.collectAsState
-import com.nocturna.votechain.data.repository.VoterRepository
 import com.nocturna.votechain.viewmodel.candidate.ElectionViewModel
 import com.nocturna.votechain.viewmodel.vote.VotingViewModel
 import com.nocturna.votechain.viewmodel.vote.VotingViewModel.VoteState
@@ -56,6 +55,7 @@ import com.nocturna.votechain.viewmodel.vote.VotingViewModel.VoteState
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CandidateSelectionScreen(
+    onBackClick: () -> Unit = {},
     navController: NavController,
     categoryId: String,
     votingViewModel: VotingViewModel,
@@ -131,116 +131,52 @@ fun CandidateSelectionScreen(
         }
     }
 
-    suspend fun getUserRegion(): String {
-        return try {
-            Log.d("CandidateSelectionScreen", "🌍 Retrieving user region from VoterData...")
-
-            // Step 1: Try to get region from VoterData (most reliable)
-            val voterRepository = VoterRepository(context)
-            val voterData = voterRepository.getVoterData()
-
-            if (voterData != null && voterData.region.isNotBlank()) {
-                Log.d("CandidateSelectionScreen", "✅ Region found in VoterData: ${voterData.region}")
-                return voterData.region
-            }
-
-            // Step 2: If VoterData region is empty, try to fetch from API
-            Log.w("CandidateSelectionScreen", "⚠️ VoterData region empty, fetching from API...")
-
-            val token = ElectionNetworkClient.getUserToken()
-            if (token.isNotEmpty()) {
-                voterRepository.fetchVoterData(token).fold(
-                    onSuccess = { fetchedVoterData ->
-                        if (fetchedVoterData.region.isNotBlank()) {
-                            Log.d("CandidateSelectionScreen", "✅ Region fetched from API: ${fetchedVoterData.region}")
-                            return fetchedVoterData.region
-                        }
-                    },
-                    onFailure = { error ->
-                        Log.e("CandidateSelectionScreen", "❌ Failed to fetch voter data from API: ${error.message}")
-                    }
-                )
-            }
-
-            // Step 3: Fallback to SharedPreferences (legacy)
-            Log.w("CandidateSelectionScreen", "⚠️ Using SharedPreferences fallback for region")
-            val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
-            val fallbackRegion = sharedPreferences.getString("user_region", null)
-                ?: sharedPreferences.getString("region", null)
-                ?: "default"
-
-            Log.d("CandidateSelectionScreen", "📱 Fallback region from SharedPreferences: $fallbackRegion")
-            fallbackRegion
-
-        } catch (e: Exception) {
-            Log.e("CandidateSelectionScreen", "❌ Exception getting user region: ${e.message}", e)
-
-            // Ultimate fallback
-            val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
-            val ultimateFallback = sharedPreferences.getString("region", "default") ?: "default"
-
-            Log.d("CandidateSelectionScreen", "🆘 Ultimate fallback region: $ultimateFallback")
-            ultimateFallback
-        }
+    // FIXED: Add user region retrieval
+    fun getUserRegion(): String {
+        val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
+        return sharedPreferences.getString("user_region", null)
+            ?: sharedPreferences.getString("region", null)
+            ?: "default"
     }
 
+    // FIXED: Add OTP token retrieval
     fun getOTPToken(): String {
         val sharedPreferences = context.getSharedPreferences("VoteChainPrefs", Context.MODE_PRIVATE)
-        val token = sharedPreferences.getString("otp_token", null) ?: ""
-        val createdTime = sharedPreferences.getLong("otp_token_created", 0)
-
-        Log.d("CandidateSelectionScreen", "Retrieving OTP token:")
-        Log.d("CandidateSelectionScreen", "  - Token found: ${if (token.isNotEmpty()) "Yes (${token.length} chars)" else "No"}")
-
-        if (token.isNotEmpty() && createdTime > 0) {
-            val tokenAge = System.currentTimeMillis() - createdTime
-            val maxAge = 5 * 60 * 1000L // 5 minutes
-
-            Log.d("CandidateSelectionScreen", "  - Token age: ${tokenAge / 1000}s")
-            Log.d("CandidateSelectionScreen", "  - Max age: ${maxAge / 1000}s")
-
-            if (tokenAge > maxAge) {
-                Log.w("CandidateSelectionScreen", "⚠️ OTP token is too old, clearing it")
-                // Clear the expired token
-                with(sharedPreferences.edit()) {
-                    remove("otp_token")
-                    remove("otp_token_created")
-                    remove("otp_token_expiry")
-                    apply()
-                }
-                return ""
-            }
-        }
-
-        Log.d("CandidateSelectionScreen", "  - Returning token: ${if (token.isNotEmpty()) "Valid" else "Empty"}")
-        return token
+        return sharedPreferences.getString("otp_token", null) ?: ""
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = strings.candidateSelection,
-                        style = AppTypography.heading4SemiBold,
-                        color = NeutralColors.Neutral90
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.back),
-                            contentDescription = "Back",
-                            tint = NeutralColors.Neutral90
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.White
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Custom top bar with shadow
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 24.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 24.dp)
+                    .clickable(onClick = onBackClick)
+                    .size(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.back),
+                    contentDescription = strings.back,
+                    tint = MainColors.Primary1,
+                    modifier = Modifier.size(20.dp)
                 )
+            }
+
+            // Screen title
+            Text(
+                text = strings.selectCandidate,
+                style = AppTypography.heading4Regular,
+                color = PrimaryColors.Primary80,
+                modifier = Modifier.align(Alignment.Center)
             )
         }
-    ) { paddingValues ->
+
         when {
             isLoading -> {
                 LoadingScreen()
@@ -250,7 +186,6 @@ fun CandidateSelectionScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues)
                         .padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
@@ -281,10 +216,9 @@ fun CandidateSelectionScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues)
-                        .padding(horizontal = 16.dp)
                         .verticalScroll(scrollState)
                 ) {
+                    // Candidate cards
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Candidate cards
@@ -356,19 +290,12 @@ fun CandidateSelectionScreen(
 
     // Confirmation Dialog
     if (showConfirmationDialog) {
-        var userRegion by remember { mutableStateOf("default") }
-
-        LaunchedEffect(showConfirmationDialog) {
-            if (showConfirmationDialog) {
-                userRegion = getUserRegion()
-                Log.d("CandidateSelectionScreen", "🌍 Dialog region loaded: $userRegion")
-            }
-        }
-
         VoteConfirmationDialog(
             onConfirm = {
                 showConfirmationDialog = false
                 selectedCandidateId?.let { electionPairId ->
+                    // FIXED: Get proper region and OTP token
+                    val userRegion = getUserRegion()
                     val otpToken = getOTPToken()
 
                     Log.d("CandidateSelectionScreen", "Submitting vote:")
@@ -391,6 +318,219 @@ fun CandidateSelectionScreen(
                 "${pair.president.full_name} & ${pair.vice_president.full_name}"
             } ?: ""
         )
+    }
+}
+
+@Composable
+fun CandidateCard(
+    electionPair: ElectionPair,
+    isSelected: Boolean,
+    onSelect: () -> Unit
+) {
+    val context = LocalContext.current
+    val isUsingFallbackData = electionPair.id.startsWith("fallback-")
+    val strings = LanguageManager.getLocalizedStrings()
+
+    // Get the authenticated image loader
+    val imageLoader = remember { CoilAuthHelper.getImageLoader(context) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clickable { onSelect() }
+            .then(
+                if (isSelected) {
+                    Modifier.border(
+                        width = 2.dp,
+                        color = PrimaryColors.Primary50,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                } else {
+                    Modifier
+                }
+            ),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.White
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (isSelected) 4.dp else 2.dp
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Candidate number
+            Text(
+                text = strings.candidate,
+                style = AppTypography.heading6Medium,
+                color = PrimaryColors.Primary60
+            )
+
+            Text(
+                text = electionPair.election_no,
+                style = AppTypography.heading5Bold,
+                color = PrimaryColors.Primary60
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Single combined candidate photo using API endpoint /v1/election/pairs/{id}/photo
+            Box(
+                modifier = Modifier
+                    .width(224.dp)
+                    .height(167.dp)
+                    .clip(RoundedCornerShape(2.dp))
+            ) {
+                if (isUsingFallbackData) {
+                    // Use local drawable for fallback data (single combined photo)
+                    Image(
+                        painter = painterResource(id = R.drawable.background),
+                        contentDescription = "Candidate Pair Photo",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    // For API data, use the /v1/election/pairs/{id}/photo endpoint
+                    val pairPhotoUrl = CandidatePhotoHelper.getPairPhotoUrl(electionPair.id)
+
+                    SubcomposeAsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(pairPhotoUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Candidate Pair Photo",
+                        imageLoader = imageLoader,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        loading = {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = MainColors.Primary1,
+                                    modifier = Modifier.size(40.dp)
+                                )
+                            }
+                        },
+                        error = {
+                            // On error, show fallback image
+                            Image(
+                                painter = painterResource(id = R.drawable.background),
+                                contentDescription = "Candidate Pair Photo (Fallback)",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Combined candidate names
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                // President name
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = strings.presidentialCandidate,
+                        style = AppTypography.paragraphRegular,
+                        color = NeutralColors.Neutral50
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = electionPair.president.full_name,
+                        style = AppTypography.heading6SemiBold.copy(lineHeight = 22.sp),
+                        color = PrimaryColors.Primary70,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2
+                    )
+                }
+
+                // Vice President name
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = strings.vicePresidentialCandidate,
+                        style = AppTypography.paragraphRegular,
+                        color = NeutralColors.Neutral50
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = electionPair.vice_president.full_name,
+                        style = AppTypography.heading6SemiBold.copy(lineHeight = 22.sp),
+                        color = PrimaryColors.Primary70,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Supporting parties section
+            if (!electionPair.supporting_parties.isNullOrEmpty()) {
+                Text(
+                    text = strings.proposingParties,
+                    style = AppTypography.paragraphRegular,
+                    color = NeutralColors.Neutral50,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                // Party logos in a horizontal scrollable row
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentWidth(Alignment.CenterHorizontally)
+                ) {
+                    items(
+                        items = electionPair.supporting_parties,
+                        key = { it.id }
+                    ) { supportingParty ->
+                        val partyPhotoUrl = PartyPhotoHelper.getPartyPhotoUrl(supportingParty.party.id)
+
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(partyPhotoUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "${supportingParty.party.name} Logo",
+                                imageLoader = imageLoader,
+                                modifier = Modifier
+                                    .fillMaxSize(),
+                                contentScale = ContentScale.Fit,
+                                error = painterResource(id = R.drawable.ic_launcher_foreground),
+                                placeholder = painterResource(id = R.drawable.ic_launcher_foreground)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -509,250 +649,6 @@ private fun VoteConfirmationDialog(
                             style = AppTypography.heading6SemiBold,
                             color = Color.White
                         )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CandidateCard(
-    electionPair: ElectionPair,
-    isSelected: Boolean,
-    onSelect: () -> Unit
-) {
-    val isUsingFallbackData = electionPair.id.startsWith("fallback-")
-    val context = LocalContext.current
-    val strings = LanguageManager.getLocalizedStrings()
-
-    // Get the authenticated image loader
-    val imageLoader = remember { CoilAuthHelper.getImageLoader(context) }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onSelect() }
-            .then(
-                if (isSelected) {
-                    Modifier.border(
-                        width = 2.dp,
-                        color = MainColors.Primary1,
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                } else {
-                    Modifier.border(
-                        width = 1.dp,
-                        color = NeutralColors.Neutral30,
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-            ),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MainColors.Primary1.copy(alpha = 0.05f) else Color.White
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = if (isSelected) 8.dp else 2.dp
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            // Candidate number
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(
-                            color = if (isSelected) MainColors.Primary1 else NeutralColors.Neutral20,
-                            shape = RoundedCornerShape(8.dp)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = electionPair.election_no.toString(),
-                        style = AppTypography.heading6Bold,
-                        color = if (isSelected) Color.White else NeutralColors.Neutral70
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Text(
-                    text = "Pasangan Calon ${electionPair.election_no}",
-                    style = AppTypography.heading6Medium,
-                    color = NeutralColors.Neutral90
-                )
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                if (isSelected) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.lock),
-                        contentDescription = "Selected",
-                        tint = MainColors.Primary1,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Candidates info
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    if (isUsingFallbackData) {
-                        // Use local drawable for fallback data
-                        Image(
-                            painter = painterResource(id = R.drawable.ic_launcher_background),
-                            contentDescription = "Candidate Pair Photo",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit
-                        )
-                    } else {
-                        // For API data, use the /v1/election/pairs/{id}/photo endpoint
-                        val pairPhotoUrl = CandidatePhotoHelper.getPairPhotoUrl(electionPair.id)
-
-                        SubcomposeAsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(pairPhotoUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "Candidate Pair Photo",
-                            imageLoader = imageLoader,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                            loading = {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(
-                                        color = MainColors.Primary1,
-                                        modifier = Modifier.size(40.dp)
-                                    )
-                                }
-                            },
-                            error = {
-                                // On error, show fallback image
-                                Image(
-                                    painter = painterResource(id = R.drawable.ic_launcher_background),
-                                    contentDescription = "Candidate Pair Photo (Fallback)",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit
-                                )
-                            }
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Combined candidate names
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    // President name
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = strings.presidentialCandidate,
-                            style = AppTypography.paragraphRegular,
-                            color = NeutralColors.Neutral50
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = electionPair.president.full_name,
-                            style = AppTypography.heading6SemiBold.copy(lineHeight = 22.sp),
-                            color = PrimaryColors.Primary70,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2
-                        )
-                    }
-
-                    // Vice President name
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = strings.vicePresidentialCandidate,
-                            style = AppTypography.paragraphRegular,
-                            color = NeutralColors.Neutral50
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = electionPair.vice_president.full_name,
-                            style = AppTypography.heading6SemiBold.copy(lineHeight = 22.sp),
-                            color = PrimaryColors.Primary70,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Supporting parties section
-                if (!electionPair.supporting_parties.isNullOrEmpty()) {
-                    Text(
-                        text = strings.proposingParties,
-                        style = AppTypography.paragraphRegular,
-                        color = NeutralColors.Neutral50,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-
-                    // Party logos in a horizontal scrollable row
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .wrapContentWidth(Alignment.CenterHorizontally)
-                    ) {
-                        items(
-                            items = electionPair.supporting_parties,
-                            key = { it.id }
-                        ) { supportingParty ->
-                            val partyPhotoUrl =
-                                PartyPhotoHelper.getPartyPhotoUrl(supportingParty.party.id)
-
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(partyPhotoUrl)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = "${supportingParty.party.name} Logo",
-                                    imageLoader = imageLoader,
-                                    modifier = Modifier
-                                        .fillMaxSize(),
-                                    contentScale = ContentScale.Fit,
-                                    error = painterResource(id = R.drawable.ic_launcher_foreground),
-                                    placeholder = painterResource(id = R.drawable.ic_launcher_foreground)
-                                )
-                            }
-                        }
                     }
                 }
             }

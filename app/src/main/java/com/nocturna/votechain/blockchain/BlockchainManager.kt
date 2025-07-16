@@ -31,7 +31,7 @@ object BlockchainManager {
     private const val TAG = "BlockchainManager"
 
     private val web3j: Web3j by lazy {
-        val nodeUrl = "https://5c581b707f2f.ngrok-free.app"
+        val nodeUrl = "https://81ef113790bc.ngrok-free.app"
         Log.d(TAG, "Initializing Web3j connection to $nodeUrl")
         Web3j.build(HttpService(nodeUrl))
     }
@@ -277,4 +277,24 @@ object BlockchainManager {
 data class FundingAccount(
     val address: String,
     val credentials: Credentials
+)
+
+data class TransactionInfo(
+    val hash: String,
+    val from: String,
+    val to: String,
+    val value: String,
+    val blockNumber: Long,
+    val timestamp: Long
+)
+
+/**
+ * Enhanced connection status with details
+ */
+data class ConnectionStatus(
+    val isConnected: Boolean,
+    val networkId: String = "",
+    val latestBlock: Long = 0,
+    val gasPrice: String = "",
+    val error: String? = null
 )

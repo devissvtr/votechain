@@ -50,7 +50,6 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val navController = rememberNavController()
                     val context = LocalContext.current
-                    val electionViewModel: ElectionViewModel = viewModel(factory = ElectionViewModel.Factory)
                     val tokenManager = TokenManager(this)
                     val isAuthenticated = TokenSyncUtil.isUserAuthenticated(this, tokenManager)
 
@@ -62,7 +61,6 @@ class MainActivity : ComponentActivity() {
                     VotechainNavGraph(
                         navController = navController,
                         startDestination = startDestination,
-                        electionViewModel = electionViewModel,
                         onNewsClick = { newsItem ->
                             // Open the news in the browser with the correct URL format:
                             // https://www.kpu.go.id/berita/baca/id/post_slug

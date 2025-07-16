@@ -111,13 +111,15 @@ class EthereumTransactionGenerator(
 
             // Step 6: Sign the transaction
             val signedMessage = TransactionEncoder.signMessage(rawTransaction, network.chainId, credentials)
+
+            // Ensure proper hex encoding with 0x prefix
             val hexValue = Numeric.toHexString(signedMessage)
 
             Log.d(TAG, "✅ Transaction signed successfully")
             Log.d(TAG, "  - Transaction length: ${hexValue.length} characters")
             Log.d(TAG, "  - Transaction preview: ${hexValue.take(66)}...")
 
-            // Validate transaction format
+            // Additional check to ensure correct formatting and avoid corrupted bytes
             if (!isValidTransactionFormat(hexValue)) {
                 Log.e(TAG, "❌ Generated transaction has invalid format")
                 return null
@@ -140,32 +142,10 @@ class EthereumTransactionGenerator(
         region: String
     ): Function {
         // This should match your smart contract's vote function signature
-        // Example: function castVote(string electionPairId, string region)
         return Function(
             BlockchainConfig.ContractMethods.CAST_VOTE,
             listOf(
                 Utf8String(electionPairId),
-                Utf8String(region)
-            ),
-            emptyList()
-        )
-    }
-
-    /**
-     * Alternative function creation for contracts that expect different parameters
-     * Uncomment and modify based on your contract's actual interface
-     */
-    private fun createVoteFunctionAlternative(
-        electionPairId: String,
-        voterId: String,
-        region: String
-    ): Function {
-        // Example for contracts that expect uint256 IDs
-        return Function(
-            "vote", // Different method name
-            listOf(
-                Uint256(BigInteger(electionPairId)), // If election pair ID is numeric
-                Address(voterId), // If voter ID is an address
                 Utf8String(region)
             ),
             emptyList()
@@ -193,6 +173,12 @@ class EthereumTransactionGenerator(
             val hex = transaction.substring(2)
             if (!hex.matches(Regex("[0-9a-fA-F]+"))) {
                 Log.e(TAG, "❌ Transaction contains non-hex characters")
+                return false
+            }
+
+            // Ensure there are no corrupted byte patterns (like repeated fefe patterns)
+            if (hex.contains(Regex("(fefe|efef){3,}"))) {
+                Log.e(TAG, "❌ Transaction contains suspicious byte patterns")
                 return false
             }
 

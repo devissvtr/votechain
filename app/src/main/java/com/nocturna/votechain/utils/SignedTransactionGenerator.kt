@@ -65,7 +65,6 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
                 ?: throw IllegalArgumentException("Invalid private key")
 
             // Fix: Ensure the private key is properly handled to maintain 256 bits
-            // Pad to 64 characters (32 bytes = 256 bits) and convert to byte array
             val privateKeyBytes = privateKeyHex.padStart(64, '0').let {
                 Numeric.hexStringToByteArray(it)
             }
