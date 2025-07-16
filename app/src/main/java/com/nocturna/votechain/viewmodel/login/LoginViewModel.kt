@@ -15,6 +15,7 @@ import com.nocturna.votechain.data.repository.IntegratedEnhancedUserRepository
 import com.nocturna.votechain.data.repository.RegistrationStateManager
 import com.nocturna.votechain.data.repository.UserLoginRepository
 import com.nocturna.votechain.data.repository.VoterRepository
+import com.nocturna.votechain.security.CryptoKeyManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +33,9 @@ class LoginViewModel(
     private val context: Context
 ) : ViewModel() {
     private val TAG = "LoginViewModel"
+
+    // Initialize CryptoKeyManager
+    private val cryptoKeyManager = CryptoKeyManager(context)
 
     // UI State
     private val _uiState = MutableStateFlow<LoginUiState>(LoginUiState.Initial)
@@ -85,8 +89,6 @@ class LoginViewModel(
 
                 Log.d(TAG, "🔐 Starting enhanced login with auto key loading for: $email")
 
-                ContractCall.executeVoteFunction()
-
                 // Step 1: Authenticate user dengan enhanced login
                 val loginResult = userLoginRepository.loginUserWithCryptoKeys(email, password)
 
@@ -110,6 +112,33 @@ class LoginViewModel(
                 Log.e(TAG, "❌ Login exception: ${e.message}", e)
                 _uiState.value = LoginUiState.Error(e.message ?: "Unknown error occurred")
             }
+        }
+    }
+
+    /**
+     * Generate signed vote transaction
+     */
+    suspend fun generateSignedVoteTransaction(electionId: String, electionNo: String): String? {
+        try {
+            Log.d(TAG, "Generating signed vote transaction for election: $electionId, number: $electionNo")
+
+            // Get private key from CryptoKeyManager
+            val privateKey = cryptoKeyManager.getPrivateKey()
+
+            if (privateKey == null) {
+                Log.e(TAG, "Failed to get private key for transaction signing")
+                return null
+            }
+
+            // Call executeVoteFunction with the required parameters
+            return ContractCall.executeVoteFunction(
+                privateKey = privateKey,
+                electionId = electionId,
+                electionNo = electionNo
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error generating signed vote transaction: ${e.message}", e)
+            return null
         }
     }
 

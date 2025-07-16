@@ -17,7 +17,7 @@ object BlockchainConfig {
         CUSTOM(
             chainId = 1337,
             rpcUrl = "https://81ef113790bc.ngrok-free.app",
-            votingContractAddress = "0x77b3cB0A4452C7Eb3fAa7D9da6979b8b74eae6D7",
+            votingContractAddress = "0x434Fe284e564432397705a76FcBC1BD82bF7b1d1",
         )
     }
 

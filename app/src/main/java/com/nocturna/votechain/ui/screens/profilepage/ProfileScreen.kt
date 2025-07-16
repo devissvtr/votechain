@@ -158,49 +158,49 @@ fun ProfileScreen(
     val scrollState = rememberScrollState()
 
     // Logout Confirmation Dialog
-    if (showLogoutDialog) {
-        AlertDialog(
-            onDismissRequest = { showLogoutDialog = false },
-            title = {
-                Text(
-                    text = "Logout",
-                    style = AppTypography.heading4Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            },
-            text = {
-                Text(
-                    text = "Are you sure you want to logout from your account?",
-                    style = AppTypography.paragraphRegular,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showLogoutDialog = false
-                        loginViewModel.logoutUser()
-                        onLogout()
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = NeutralColors.Neutral40
-                    )
-                ) {
-                    Text("Logout")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showLogoutDialog = false },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
+//    if (showLogoutDialog) {
+//        AlertDialog(
+//            onDismissRequest = { showLogoutDialog = false },
+//            title = {
+//                Text(
+//                    text = "Logout",
+//                    style = AppTypography.heading4Bold,
+//                    color = MaterialTheme.colorScheme.onSurface
+//                )
+//            },
+//            text = {
+//                Text(
+//                    text = "Are you sure you want to logout from your account?",
+//                    style = AppTypography.paragraphRegular,
+//                    color = MaterialTheme.colorScheme.onSurfaceVariant
+//                )
+//            },
+//            confirmButton = {
+//                TextButton(
+//                    onClick = {
+//                        showLogoutDialog = false
+//                        loginViewModel.logoutUser()
+//                        onLogout()
+//                    },
+//                    colors = ButtonDefaults.textButtonColors(
+//                        contentColor = NeutralColors.Neutral40
+//                    )
+//                ) {
+//                    Text("Logout")
+//                }
+//            },
+//            dismissButton = {
+//                TextButton(
+//                    onClick = { showLogoutDialog = false },
+//                    colors = ButtonDefaults.textButtonColors(
+//                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+//                    )
+//                ) {
+//                    Text("Cancel")
+//                }
+//            }
+//        )
+//    }
 
     Box(
         modifier = Modifier
@@ -604,36 +604,36 @@ fun ProfileScreen(
                         modifier = Modifier.size(16.dp),
                     )
                 }
-
-                Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
-
-                Button(
-                    onClick = { showLogoutDialog = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = DangerColors.Danger70,
-                        contentColor = NeutralColors.Neutral10
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    elevation = ButtonDefaults.buttonElevation(
-                        defaultElevation = 0.dp,
-                        pressedElevation = 2.dp
-                    )
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Logout",
-                            style = AppTypography.heading5Medium,
-                            color = NeutralColors.Neutral10
-                        )
-                    }
-                }
+//
+//                Divider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+//
+//                Button(
+//                    onClick = { showLogoutDialog = true },
+//                    modifier = Modifier
+//                        .fillMaxWidth()
+//                        .padding(16.dp)
+//                        .height(48.dp),
+//                    colors = ButtonDefaults.buttonColors(
+//                        containerColor = DangerColors.Danger70,
+//                        contentColor = NeutralColors.Neutral10
+//                    ),
+//                    shape = RoundedCornerShape(8.dp),
+//                    elevation = ButtonDefaults.buttonElevation(
+//                        defaultElevation = 0.dp,
+//                        pressedElevation = 2.dp
+//                    )
+//                ) {
+//                    Row(
+//                        horizontalArrangement = Arrangement.Center,
+//                        verticalAlignment = Alignment.CenterVertically
+//                    ) {
+//                        Text(
+//                            text = "Logout",
+//                            style = AppTypography.heading5Medium,
+//                            color = NeutralColors.Neutral10
+//                        )
+//                    }
+//                }
             }
         }
 

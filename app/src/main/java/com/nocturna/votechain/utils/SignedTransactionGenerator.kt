@@ -3,6 +3,7 @@ package com.nocturna.votechain.utils
 import android.util.Log
 import com.nocturna.votechain.blockchain.BlockchainConfig
 import com.nocturna.votechain.blockchain.BlockchainManager
+import com.nocturna.votechain.blockchain.ContractCall
 import com.nocturna.votechain.security.CryptoKeyManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,7 +27,7 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
     }
 
     /**
-     * Generate enhanced signed transaction for voting
+     * Generate enhanced signed transaction for voting using ContractCall
      * @param electionPairId The ID of the selected candidate pair
      * @param voterId The voter's unique identifier
      * @param region The voter's region
@@ -52,7 +53,74 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
                 return@withContext null
             }
 
-            // Step 2: Prepare transaction parameters
+            // Step 2: Get private key
+            val privateKey = cryptoKeyManager.getPrivateKey()
+            if (privateKey.isNullOrEmpty()) {
+                Log.e(TAG, "❌ Private key is null or empty")
+                return@withContext null
+            }
+
+            // Step 3: Use ContractCall.executeVoteFunction to generate the signed transaction
+            // The electionNo is derived from the region for this implementation
+            val electionNo = deriveElectionNumberFromRegion(region)
+
+            val signedTransaction = ContractCall.executeVoteFunction(
+                privateKey = privateKey,
+                electionId = electionPairId,
+                electionNo = electionNo
+            )
+
+            if (signedTransaction.isNullOrEmpty()) {
+                Log.e(TAG, "❌ Failed to generate signed transaction using ContractCall")
+                return@withContext fallbackToLegacyTransactionGeneration(
+                    electionPairId, voterId, region, timestamp, privateKey
+                )
+            }
+
+            Log.d(TAG, "✅ Signed transaction generated using ContractCall: ${signedTransaction.take(16)}...")
+            return@withContext signedTransaction
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Exception during transaction generation with ContractCall", e)
+            try {
+                // Fallback to legacy transaction generation
+                val privateKey = cryptoKeyManager.getPrivateKey()
+                if (privateKey != null) {
+                    return@withContext fallbackToLegacyTransactionGeneration(
+                        electionPairId, voterId, region, timestamp, privateKey
+                    )
+                }
+            } catch (fallbackEx: Exception) {
+                Log.e(TAG, "❌ Fallback transaction generation also failed", fallbackEx)
+            }
+            return@withContext null
+        }
+    }
+
+    /**
+     * Derive election number from region
+     * This is a placeholder implementation - adjust according to your system's requirements
+     */
+    private fun deriveElectionNumberFromRegion(region: String): String {
+        // Simple mapping from region to election number
+        // In a real implementation, this might come from a lookup table or API
+        return region.hashCode().rem(10).toString().replace("-", "")
+    }
+
+    /**
+     * Fallback to legacy transaction generation method
+     */
+    private suspend fun fallbackToLegacyTransactionGeneration(
+        electionPairId: String,
+        voterId: String,
+        region: String,
+        timestamp: Long,
+        privateKeyHex: String
+    ): String? = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "🔄 Falling back to legacy transaction generation")
+
+            // Step 1: Prepare transaction parameters
             val nonce = BigInteger.ZERO // Replace with actual nonce retrieval logic
             val to = BlockchainConfig.activeNetwork.votingContractAddress
             val value = BigInteger.ZERO
@@ -61,13 +129,10 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
             val maxFeePerGas = BigInteger.valueOf(BlockchainConfig.Gas.MAX_FEE_PER_GAS_GWEI)
             val gasLimit = BigInteger.valueOf(BlockchainConfig.Gas.VOTE_GAS_LIMIT)
             val chainId = BlockchainConfig.activeNetwork.chainId
-            val privateKeyHex = cryptoKeyManager.getPrivateKey()?.removePrefix("0x")
-                ?: throw IllegalArgumentException("Invalid private key")
+            val privateKeyClean = privateKeyHex.removePrefix("0x").padStart(64, '0')
 
             // Fix: Ensure the private key is properly handled to maintain 256 bits
-            val privateKeyBytes = privateKeyHex.padStart(64, '0').let {
-                Numeric.hexStringToByteArray(it)
-            }
+            val privateKeyBytes = Numeric.hexStringToByteArray(privateKeyClean)
             // Use sign bit 1 (positive) to preserve all bytes including leading zeros
             val privateKey = BigInteger(1, privateKeyBytes)
 
@@ -78,7 +143,7 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
                 throw IllegalArgumentException("Invalid private key length. Expected 256 bits.")
             }
 
-            // Step 3: Generate signed transaction
+            // Step 2: Generate signed transaction
             val signedTransaction = BlockchainManager.createAndSignTransaction(
                 nonce,
                 to,
@@ -91,13 +156,39 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
                 privateKey
             )
 
-            Log.d(TAG, "✅ Signed transaction generated: ${signedTransaction.take(16)}...")
+            Log.d(TAG, "✅ Signed transaction generated with legacy method: ${signedTransaction.take(16)}...")
             return@withContext signedTransaction
 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Exception during transaction generation", e)
+            Log.e(TAG, "❌ Exception during legacy transaction generation", e)
             return@withContext null
         }
+    }
+
+    /**
+     * Validate transaction inputs
+     */
+    private fun validateTransactionInputs(
+        electionPairId: String,
+        voterId: String,
+        region: String
+    ): Boolean {
+        if (electionPairId.isBlank()) {
+            Log.e(TAG, "❌ Election pair ID is empty")
+            return false
+        }
+
+        if (voterId.isBlank()) {
+            Log.e(TAG, "❌ Voter ID is empty")
+            return false
+        }
+
+        if (region.isBlank()) {
+            Log.e(TAG, "❌ Region is empty")
+            return false
+        }
+
+        return true
     }
 
     /**
@@ -158,46 +249,6 @@ class SignedTransactionGenerator(private val cryptoKeyManager: CryptoKeyManager)
         } catch (e: Exception) {
             Log.e(TAG, "❌ Transaction validation exception", e)
             return TransactionValidationResult(false, "Validation failed: ${e.message}")
-        }
-    }
-
-    /**
-     * Validate transaction inputs
-     */
-    private fun validateTransactionInputs(
-        electionPairId: String,
-        voterId: String,
-        region: String
-    ): Boolean {
-        return when {
-            electionPairId.isBlank() -> {
-                Log.e(TAG, "❌ Election pair ID is blank")
-                false
-            }
-            voterId.isBlank() -> {
-                Log.e(TAG, "❌ Voter ID is blank")
-                false
-            }
-            region.isBlank() -> {
-                Log.e(TAG, "❌ Region is blank")
-                false
-            }
-            electionPairId.length > 100 -> {
-                Log.e(TAG, "❌ Election pair ID too long")
-                false
-            }
-            voterId.length > 50 -> {
-                Log.e(TAG, "❌ Voter ID too long")
-                false
-            }
-            region.length > 50 -> {
-                Log.e(TAG, "❌ Region too long")
-                false
-            }
-            else -> {
-                Log.d(TAG, "✅ Transaction inputs validated")
-                true
-            }
         }
     }
 

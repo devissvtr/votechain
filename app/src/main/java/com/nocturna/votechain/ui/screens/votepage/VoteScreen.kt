@@ -253,15 +253,15 @@ fun VotingCard(
                 Text(
                     text = votingCategory.title,
                     style = AppTypography.heading5Bold,
-                    color = if (hasVoted) NeutralColors.Neutral50 else MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = if (hasVoted) "You have already voted" else votingCategory.description,
+                    text = votingCategory.description,
                     style = AppTypography.heading6Medium,
-                    color = if (hasVoted) NeutralColors.Neutral40 else MaterialTheme.colorScheme.onBackground,
+                    color = MaterialTheme.colorScheme.onBackground,
                     maxLines = 1,
                     modifier = Modifier.width(270.dp),
                     overflow = TextOverflow.Ellipsis
@@ -271,7 +271,7 @@ fun VotingCard(
             Icon(
                 painter = painterResource(id = R.drawable.right2),
                 contentDescription = "View Details",
-                tint = if (hasVoted) NeutralColors.Neutral40 else MainColors.Primary1,
+                tint = MainColors.Primary1,
                 modifier = Modifier.size(16.dp)
             )
         }

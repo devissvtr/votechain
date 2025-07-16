@@ -155,7 +155,7 @@ class VotingRepository(
                 region = region,
                 voter_id = getVoterId() ?: "",
                 signed_transaction = signedTransaction,
-                otp_token = getOtpToken() ?: ""  // Retrieve OTP token dynamically or handle null case
+                otp_token = otpToken ?: getOtpToken() ?: ""  // Use provided OTP token first, then fallback to stored token
             )
 
             Log.d(TAG, "📤 Sending vote request to server...")
